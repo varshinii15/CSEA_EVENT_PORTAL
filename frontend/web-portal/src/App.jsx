@@ -3,6 +3,7 @@ import './App.css'
 import RoundOne from './components/RoundOne'
 import RoundTwo from './components/RoundTwo'
 import Login from './components/Login'
+import Credits from './components/Credits'
 // import StrangerThingsIntro from './components/StrangerThingsIntro' // Disabled - using video intro instead
 import VideoIntro from './components/VideoIntro'
 
@@ -15,6 +16,7 @@ function App() {
   const [fragments, setFragments] = useState([]);
   const [showIntro, setShowIntro] = useState(false); // Will be set based on localStorage check
   const [loginFadeIn, setLoginFadeIn] = useState(false);
+  const [showCredits, setShowCredits] = useState(false);
 
   // On mount, check localStorage for a saved login and intro status
   useEffect(() => {
@@ -58,6 +60,20 @@ function App() {
     }
   }, []);
 
+  // Check for credits only on mount if user is already logged in (refresh after finale completion)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('loggedInYear');
+      const finaleComplete = localStorage.getItem('finaleVideoComplete');
+      // Only show credits if user is already logged in AND finale is complete (refresh scenario)
+      if (saved && finaleComplete === 'true') {
+        setShowCredits(true);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, []); // Only run on mount, not when loggedInYear changes
+
   // Save fragments to localStorage whenever they change
   useEffect(() => {
     if (fragments.length > 0) {
@@ -100,9 +116,13 @@ function App() {
           <Login onLogin={(year, rollNum) => {
             setLoggedInYear(year);
             setRollNumber(rollNum);
+            // Always start at Round 1 when logging in
+            setCurrentRound(1);
+            setShowCredits(false); // Ensure credits are not shown on fresh login
             try { 
               localStorage.setItem('loggedInYear', year);
               if (rollNum) localStorage.setItem('rollNumber', rollNum);
+              localStorage.setItem('currentRound', '1');
             } catch (e) { /* ignore */ }
           }} />
           <footer className="footer">
@@ -129,6 +149,18 @@ function App() {
     );
   }
 
+  // Show credits if game is complete
+  if (showCredits) {
+    return (
+      <Credits 
+        onComplete={() => {
+          // Credits finished - keep credits visible, don't restart
+          // Do nothing - credits stay on screen with final message
+        }} 
+      />
+    );
+  }
+
   return (
     <div className="app-container">
       {/* User Roll Number Display - Top Right */}
@@ -142,10 +174,13 @@ function App() {
         {(() => {
           switch (currentRound) {
             case 1:
-              return <RoundOne onComplete={() => {
-                setCurrentRound(2);
-                // Round One completion is saved automatically via the useEffect above
-              }} />;
+              return <RoundOne 
+                loggedInYear={loggedInYear}
+                onComplete={() => {
+                  setCurrentRound(2);
+                  // Round One completion is saved automatically via the useEffect above
+                }} 
+              />;
             case 2:
               return <RoundTwo 
                 loggedInYear={loggedInYear}
@@ -154,13 +189,15 @@ function App() {
                 onComplete={() => {
                   // Round 2 completion triggers JoyceWall
                   // JoyceWall shows jumbled message → finale video → password input (Round 3)
-                  // When JoyceWall video completes, the entire game is finished
+                  // When JoyceWall video completes, show credits
                   // Mark game as complete in localStorage
                   try {
                     localStorage.setItem('gameComplete', 'true');
                   } catch (e) {
                     // ignore
                   }
+                  // Show credits after Round 3 completes
+                  setShowCredits(true);
                 }} 
               />;
             default:

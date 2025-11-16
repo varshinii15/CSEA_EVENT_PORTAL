@@ -9,12 +9,12 @@
   cursor: pointer;
 }
 
-/* Hide cursor during video playback */
-.video-intro-container:has(.intro-video:not(.hidden)) {
+/* Hide cursor during video playback, but keep it visible when waiting for interaction */
+.video-intro-container:has(.intro-video:not(.hidden)):not(.waiting-interaction) {
   cursor: none !important;
 }
 
-body:has(.video-intro-container:not(.video-hidden)) {
+body:has(.video-intro-container:not(.video-hidden):not(.waiting-interaction)) {
   cursor: none !important;
 }
 
@@ -59,20 +59,28 @@ body:has(.video-intro-container:not(.video-hidden)) {
   justify-content: center;
   z-index: 10001;
   pointer-events: none;
-  background: rgba(0, 0, 0, 0.92);
-  opacity: 0;
-  transform: scale(0.985);
-  transition: opacity 0.8s ease, transform 0.8s ease;
+  background: #000000;
+  opacity: 1;
+  transform: scale(1);
+  transition: none;
 }
 
 .thanks-overlay.visible {
   opacity: 1;
   transform: scale(1);
+  background: #000000;
 }
 
 .thanks-overlay.hiding {
-  opacity: 0;
-  transform: scale(0.97);
+  opacity: 1;
+  transform: scale(1);
+  background: #000000;
+}
+
+.thanks-overlay.delaying {
+  opacity: 1;
+  transform: scale(1);
+  background: #000000;
 }
 
 .thanks-content {
@@ -89,13 +97,21 @@ body:has(.video-intro-container:not(.video-hidden)) {
   letter-spacing: 0.08em;
   opacity: 0;
   animation: thanksContentFadeIn 0.8s ease forwards;
+  transition: opacity 0.3s ease;
+}
+
+.thanks-content.content-hidden {
+  opacity: 0;
+  transition: opacity 0.3s ease;
 }
 
 .thanks-overlay.visible .thanks-content {
+  opacity: 1;
   animation: thanksContentFadeIn 0.8s ease forwards;
 }
 
 .thanks-overlay.hiding .thanks-content {
+  opacity: 0;
   animation: thanksContentFadeOut 0.8s ease forwards;
 }
 

@@ -6,19 +6,23 @@ import finaleVideo from '../assets/stranger-things-finale.mp4';
 // import narrativeMusic from '../assets/narrative-music.mp3';
 // import joyceWallMusic from '../assets/joyce-wall-music.mp3';
 
-export default function JoyceWall({ triggerWord, onComplete, fragments = [] }) {
+export default function JoyceWall({ triggerWord, onComplete, fragments = [], loggedInYear = '1st' }) {
   const [showJumbledMessage, setShowJumbledMessage] = useState(false);
   const [showJoyceWallVideo, setShowJoyceWallVideo] = useState(false);
   const [showFinaleVideo, setShowFinaleVideo] = useState(false);
   const [showPasswordInput, setShowPasswordInput] = useState(false);
   const [showJoyceWallMessage, setShowJoyceWallMessage] = useState(false);
+  const [showClues, setShowClues] = useState(false);
   const [password, setPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
   const [videoPaused, setVideoPaused] = useState(false);
   const [joyceWallVideoComplete, setJoyceWallVideoComplete] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [finaleVideoFading, setFinaleVideoFading] = useState(false);
   const joyceWallVideoRef = useRef(null);
   const finaleVideoRef = useRef(null);
+  const finaleVideoContainerRef = useRef(null);
   const narrativeMusicRef = useRef(null);
   const joyceWallMusicRef = useRef(null);
   
@@ -29,6 +33,30 @@ export default function JoyceWall({ triggerWord, onComplete, fragments = [] }) {
   
   // Time to pause finale video (when Eleven starts using power) - adjust this value
   const PAUSE_TIME = 8; // seconds - adjust based on your video
+
+  // Clues for first year
+  const firstYearClues = [
+    "1. The quiet town hides a secret at its end. Take the last three letters of its name and reverse them. (letters all lowercase.)",
+    "2. Count only the letters that are not vowels in the place where people collect ideas on boards. (The result is a digit.)",
+    "3. The ruler of the Upside Down, who controls the mind, leaves a clue. Find letters 3–5, flip them backward, and write all three letters in uppercase.",
+    "4. A lone number stands exactly as it is. Do not alter it.",
+    "5. From the creature that lurks between the two worlds, whose name begins with dread, take its opening three-letter fragment and write it in ALL CAPS.",
+    "6. The power that moves objects. Take the first and last letters and write both in uppercase.",
+    "7. Finish with a sharp symbol: add #."
+  ];
+
+  // Clues for second year
+  const secondYearClues = [
+    "1. A beast born from Hawkins Lab hides a faithful pet within its very name. Take that pet, change it to CAPS , flip it backwards, and replace every \"o\" in it with 0.",
+    "2. When all lights go out, one word describes that world. From that word, take the last three letters and enter them backwards, all in lowercase.",
+    "3. She is a well-known goddess of power and destruction in India. Use the first two letters of her name in ALL CAPS.",
+    "4. The mind's silent force begins and ends boldly. Take the first and last letters of the word and write both in uppercase.",
+    "5. A timeless proverb about friends. Count the number of words in it and use that number.",
+    "6. The boy who changed Hawkins forever left behind a surname of five letters. Replace every vowel with ! and write the result in ALL CAPS.",
+    "7. Every coded message needs its closure. End yours with the mark that glints like a sharpened hook: $."
+  ];
+
+  const clues = loggedInYear === '1st' ? firstYearClues : secondYearClues;
 
   const [canContinue, setCanContinue] = useState(false);
 
@@ -81,7 +109,7 @@ export default function JoyceWall({ triggerWord, onComplete, fragments = [] }) {
     setShowJoyceWallMessage(true);
   };
 
-  // Handle continue from JoyceWall to finale video
+  // Handle continue from JoyceWall to clues display
   const handleContinueToFinale = () => {
     // Stop Joyce wall music
     if (joyceWallMusicRef.current) {
@@ -90,6 +118,13 @@ export default function JoyceWall({ triggerWord, onComplete, fragments = [] }) {
     }
     setShowJoyceWallVideo(false);
     setShowJoyceWallMessage(false);
+    // Show clues first before finale video
+    setShowClues(true);
+  };
+
+  // Handle continue from clues to finale video
+  const handleContinueFromClues = () => {
+    setShowClues(false);
     // Transition to finale video after a short delay
     setTimeout(() => {
       setShowFinaleVideo(true);
@@ -135,13 +170,51 @@ export default function JoyceWall({ triggerWord, onComplete, fragments = [] }) {
     }
   }, [showJoyceWallVideo, playJoyceWallVideo]);
 
-  // Play finale video function
+  // Play finale video function with fullscreen and cursor restrictions
   const playFinaleVideo = useCallback(async () => {
-    if (finaleVideoRef.current) {
+    if (finaleVideoRef.current && finaleVideoContainerRef.current) {
+      const video = finaleVideoRef.current;
+      const container = finaleVideoContainerRef.current;
+      
+      // Ensure video starts from the beginning
+      video.currentTime = 0;
+      
+      // Enter fullscreen on CONTAINER (not video) so password overlay is included
+      const enterFullscreen = async () => {
+        try {
+          const el = container;
+          if (el.requestFullscreen) {
+            await el.requestFullscreen();
+          } else if (el.webkitRequestFullscreen) {
+            await el.webkitRequestFullscreen();
+          } else if (el.mozRequestFullScreen) {
+            await el.mozRequestFullScreen();
+          } else if (el.msRequestFullscreen) {
+            await el.msRequestFullscreen();
+          }
+          setIsFullscreen(true);
+        } catch (err) {
+          console.log('Fullscreen error:', err);
+        }
+        // Hide cursor on body, video, and fullscreen element
+        document.body.style.cursor = 'none';
+        video.style.cursor = 'none';
+        const fsEl = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+        if (fsEl) {
+          fsEl.style.cursor = 'none';
+        }
+      };
+      
       try {
+        await enterFullscreen();
         setIsPlaying(true);
         setVideoPaused(false);
-        await finaleVideoRef.current.play();
+        // Ensure password input is reset when starting video
+        setShowPasswordInput(false);
+        // Hide cursor immediately when video starts
+        document.body.style.cursor = 'none';
+        video.style.cursor = 'none';
+        await video.play();
       } catch (error) {
         console.error('Error playing finale video:', error);
         setIsPlaying(false);
@@ -184,9 +257,51 @@ export default function JoyceWall({ triggerWord, onComplete, fragments = [] }) {
   }, [PAUSE_TIME, videoPaused, showPasswordInput]);
 
   // Handle finale video end - game is complete!
-  const handleFinaleVideoEnd = () => {
-    setIsPlaying(false);
-    // Show completion message for a moment, then call onComplete
+  const handleFinaleVideoEnd = async () => {
+    // Start fade-out transition
+    setFinaleVideoFading(true);
+    
+    // Immediately stop and pause the video
+    if (finaleVideoRef.current) {
+      finaleVideoRef.current.pause();
+      finaleVideoRef.current.currentTime = finaleVideoRef.current.duration; // Ensure it's at the end
+      setIsPlaying(false);
+    }
+    
+    // Mark finale video as complete in localStorage so refresh shows credits
+    try {
+      localStorage.setItem('finaleVideoComplete', 'true');
+      localStorage.setItem('gameComplete', 'true');
+    } catch (e) {
+      // ignore
+    }
+    
+    // Restore cursor and exit fullscreen after fade starts
+    setTimeout(async () => {
+      document.body.style.cursor = '';
+      const exitFullscreenSafe = async () => {
+        try {
+          if (document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement) {
+            if (document.exitFullscreen) {
+              await document.exitFullscreen();
+            } else if (document.webkitExitFullscreen) {
+              await document.webkitExitFullscreen();
+            } else if (document.mozCancelFullScreen) {
+              await document.mozCancelFullScreen();
+            } else if (document.msExitFullscreen) {
+              await document.msExitFullscreen();
+            }
+          }
+        } catch (err) {
+          console.log('Exit fullscreen error:', err);
+        }
+      };
+      
+      await exitFullscreenSafe();
+      setIsFullscreen(false);
+    }, 500);
+    
+    // Call onComplete to show credits after fade-out completes
     setTimeout(() => {
       if (onComplete) {
         onComplete();
@@ -197,6 +312,12 @@ export default function JoyceWall({ triggerWord, onComplete, fragments = [] }) {
   // Handle finale video loaded metadata - start playing
   const handleFinaleVideoLoaded = useCallback(() => {
     if (finaleVideoRef.current && showFinaleVideo) {
+      const video = finaleVideoRef.current;
+      // Ensure video starts from beginning
+      video.currentTime = 0;
+      // Reset password input state
+      setShowPasswordInput(false);
+      setVideoPaused(false);
       playFinaleVideo();
     }
   }, [showFinaleVideo, playFinaleVideo]);
@@ -204,11 +325,81 @@ export default function JoyceWall({ triggerWord, onComplete, fragments = [] }) {
   // Start finale video when it becomes visible
   useEffect(() => {
     if (showFinaleVideo && finaleVideoRef.current) {
-      if (finaleVideoRef.current.readyState >= 2) {
+      const video = finaleVideoRef.current;
+      // Ensure video starts from beginning
+      video.currentTime = 0;
+      // Reset password input state
+      setShowPasswordInput(false);
+      setVideoPaused(false);
+      if (video.readyState >= 2) {
         playFinaleVideo();
       }
     }
   }, [showFinaleVideo, playFinaleVideo]);
+
+  // Handle fullscreen change events for finale video
+  useEffect(() => {
+    if (!showFinaleVideo) return;
+    
+    const onFullscreenChange = () => {
+      const active = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+      setIsFullscreen(active);
+      
+      // Ensure cursor stays hidden when in fullscreen
+      if (active) {
+        document.body.style.cursor = 'none';
+        if (finaleVideoRef.current) {
+          finaleVideoRef.current.style.cursor = 'none';
+        }
+        const fsEl = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+        if (fsEl) {
+          fsEl.style.cursor = 'none';
+        }
+      }
+    };
+    
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+    document.addEventListener('mozfullscreenchange', onFullscreenChange);
+    document.addEventListener('MSFullscreenChange', onFullscreenChange);
+    
+    return () => {
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', onFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', onFullscreenChange);
+    };
+  }, [showFinaleVideo]);
+
+  // Cleanup finale video: restore cursor and exit fullscreen
+  useEffect(() => {
+    if (!showFinaleVideo) return;
+    
+    return () => {
+      // Restore cursor
+      document.body.style.cursor = '';
+      
+      // Exit fullscreen
+      const exitFullscreenSafe = async () => {
+        try {
+          if (document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement) {
+            if (document.exitFullscreen) {
+              await document.exitFullscreen();
+            } else if (document.webkitExitFullscreen) {
+              await document.webkitExitFullscreen();
+            } else if (document.mozCancelFullScreen) {
+              await document.mozCancelFullScreen();
+            } else if (document.msExitFullscreen) {
+              await document.msExitFullscreen();
+            }
+          }
+        } catch (err) {
+          // ignore
+        }
+      };
+      exitFullscreenSafe();
+    };
+  }, [showFinaleVideo]);
 
   // Handle password submit
   const handlePasswordSubmit = (e) => {
@@ -228,6 +419,8 @@ export default function JoyceWall({ triggerWord, onComplete, fragments = [] }) {
       setShowPasswordInput(false);
       setVideoPaused(false);
       if (finaleVideoRef.current) {
+        // Ensure cursor is hidden when resuming video
+        document.body.style.cursor = 'none';
         finaleVideoRef.current.play();
         setIsPlaying(true);
       }
@@ -256,6 +449,26 @@ export default function JoyceWall({ triggerWord, onComplete, fragments = [] }) {
         joyceWallMusicRef.current.pause();
         joyceWallMusicRef.current.currentTime = 0;
       }
+      // Restore cursor and exit fullscreen on unmount
+      document.body.style.cursor = '';
+      const exitFullscreenSafe = async () => {
+        try {
+          if (document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement) {
+            if (document.exitFullscreen) {
+              await document.exitFullscreen();
+            } else if (document.webkitExitFullscreen) {
+              await document.webkitExitFullscreen();
+            } else if (document.mozCancelFullScreen) {
+              await document.mozCancelFullScreen();
+            } else if (document.msExitFullscreen) {
+              await document.msExitFullscreen();
+            }
+          }
+        } catch (err) {
+          // ignore
+        }
+      };
+      exitFullscreenSafe();
     };
   }, []);
 
@@ -356,66 +569,124 @@ export default function JoyceWall({ triggerWord, onComplete, fragments = [] }) {
 
       {/* Phase 2: Finale Video */}
       {showFinaleVideo && (
-        <video 
-          ref={finaleVideoRef}
-          src={finaleVideo}
-          className="joyce-wall-video"
-          onLoadedMetadata={handleFinaleVideoLoaded}
-          onTimeUpdate={handleFinaleTimeUpdate}
-          onEnded={handleFinaleVideoEnd}
-          onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
-          playsInline
-          preload="auto"
-          muted={false}
-        />
+        <div 
+          ref={finaleVideoContainerRef} 
+          className={`finale-video-container ${finaleVideoFading ? 'fading-out' : ''}`}
+        >
+          <video 
+            ref={finaleVideoRef}
+            src={finaleVideo}
+            className="joyce-wall-video finale-video"
+            onLoadedMetadata={handleFinaleVideoLoaded}
+            onTimeUpdate={handleFinaleTimeUpdate}
+            onEnded={handleFinaleVideoEnd}
+            onPlay={() => {
+              setIsPlaying(true);
+              // Hide cursor when video plays - target body, video, and fullscreen element
+              document.body.style.cursor = 'none';
+              if (finaleVideoRef.current) {
+                finaleVideoRef.current.style.cursor = 'none';
+              }
+              const fsEl = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+              if (fsEl) {
+                fsEl.style.cursor = 'none';
+              }
+            }}
+            onPause={() => {
+              setIsPlaying(false);
+              // Keep cursor hidden in fullscreen even when paused
+              const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+              if (isFs) {
+                document.body.style.cursor = 'none';
+                if (finaleVideoRef.current) {
+                  finaleVideoRef.current.style.cursor = 'none';
+                }
+                const fsEl = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+                if (fsEl) {
+                  fsEl.style.cursor = 'none';
+                }
+              }
+            }}
+            playsInline
+            preload="auto"
+            muted={false}
+            onLoadedData={() => {
+              // Ensure video starts from beginning when data is loaded
+              if (finaleVideoRef.current) {
+                finaleVideoRef.current.currentTime = 0;
+              }
+            }}
+            style={{
+              width: '100vw',
+              height: '100vh',
+              objectFit: 'cover',
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              zIndex: 10000,
+              pointerEvents: 'none',
+              cursor: 'none'
+            }}
+          />
+          
+          {/* Password Input Overlay - INSIDE the fullscreen container */}
+          {showPasswordInput && (
+            <div className="password-overlay">
+              <div className="password-overlay-content">
+                <div className="password-title-section">
+                  <div className="password-round-label">ROUND 3: THE FINAL SEAL</div>
+                  <h2 className="password-title">ELEVEN NEEDS YOUR HELP</h2>
+                  <p className="password-subtitle">ENTER THE PASSWORD TO CLOSE THE GATE</p>
+                </div>
+                
+                <form onSubmit={handlePasswordSubmit} className="password-form-overlay">
+                  <div className="password-input-wrapper">
+                    <input
+                      type="text"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="ENTER PASSWORD..."
+                      className="password-input-game"
+                      autoFocus
+                      autoComplete="off"
+                      required
+                    />
+                    {passwordError && (
+                      <div className="password-error">{passwordError}</div>
+                    )}
+                  </div>
+                  
+                  <button type="submit" className="password-submit-button">
+                    <span className="button-text">SEAL THE GATE</span>
+                    <span className="button-icon">🔒</span>
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
+
+        </div>
       )}
 
-      {/* Password Input Overlay - Game-like UI */}
-      {showPasswordInput && (
-        <div className="password-overlay">
-          <div className="password-overlay-content">
-            <div className="password-title-section">
-              <div className="password-round-label">ROUND 3: THE FINAL SEAL</div>
-              <h2 className="password-title">ELEVEN NEEDS YOUR HELP</h2>
-              <p className="password-subtitle">Enter the password to close the gate</p>
-            </div>
-            
-            <form onSubmit={handlePasswordSubmit} className="password-form-overlay">
-              <div className="password-input-wrapper">
-                <input
-                  type="text"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter password..."
-                  className="password-input-game"
-                  autoFocus
-                  autoComplete="off"
-                  required
-                />
-                {passwordError && (
-                  <div className="password-error">{passwordError}</div>
-                )}
-              </div>
-              
-              <button type="submit" className="password-submit-button">
-                <span className="button-text">SEAL THE GATE</span>
-                <span className="button-icon">🔒</span>
-              </button>
-            </form>
-
-            {/* Show fragments hint */}
-            {fragments.length > 0 && (
-              <div className="fragments-hint-overlay">
-                <div className="fragments-hint-label">Your Fragments:</div>
-                <div className="fragments-display-overlay">
-                  {fragments.map((fragment, index) => (
-                    <span key={index} className="fragment-badge">{fragment}</span>
-                  ))}
+      {/* Clues Display - Shows after Joyce Wall and before finale video */}
+      {showClues && (
+        <div className="clues-overlay">
+          <div className="clues-content">
+            <h2 className="clues-heading">THE PORTAL CLUES</h2>
+            <div className="clues-list">
+              {clues.map((clue, index) => (
+                <div key={index} className="clue-item">
+                  {clue}
                 </div>
-              </div>
-            )}
+              ))}
+            </div>
           </div>
+          <button 
+            onClick={handleContinueFromClues}
+            className="clue-tap-to-continue"
+          >
+            TAP TO CONTINUE
+          </button>
         </div>
       )}
     </div>

@@ -36,15 +36,47 @@ async function apiFetch(path, { method = 'GET', headers = {}, body } = {}) {
   return data;
 }
 
+// BYPASSED: Backend authentication disabled - mock functions for local development
 async function requestOtp(email) {
-  return apiFetch('/auth/check-email', { method: 'POST', body: { email } });
+  // Mock: Simulate API delay, then return success
+  await new Promise(resolve => setTimeout(resolve, 500));
+  return { message: 'OTP sent successfully (mock)' };
 }
 
 async function verifyOtpAndStore(email, otp) {
-  const data = await apiFetch('/auth/verify-otp', { method: 'POST', body: { email, otp } });
-  if (data?.token) setToken(data.token);
-  const claims = data?.token ? decodeJwt(data.token) : null;
-  return { token: data?.token, claims, redirectPath: data?.redirectPath };
+  // Mock: Simulate API delay, then return mock token and claims
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
+  // Extract year from email pattern (e.g., "24z368" -> year 1 if starts with 24, year 2 if starts with 23)
+  // Default to year 1 if pattern doesn't match
+  const yearMatch = /^([0-9]{2})/.exec(email);
+  let year = 1; // Default to first year
+  if (yearMatch) {
+    const yearPrefix = parseInt(yearMatch[1], 10);
+    // Simple heuristic: 24 = 1st year, 23 = 2nd year (adjust as needed)
+    year = yearPrefix >= 25 ? 1 : 2;
+  }
+  
+  // Create a simple mock token (not a real JWT, but compatible with decodeJwt)
+  const mockPayload = {
+    email: email,
+    year: year,
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 3600 // 1 hour expiry
+  };
+  
+  // Create a mock JWT-like token (header.payload.signature format)
+  const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const payload = btoa(JSON.stringify(mockPayload)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  const mockToken = `${header}.${payload}.mock-signature`;
+  
+  setToken(mockToken);
+  const claims = decodeJwt(mockToken);
+  return { 
+    token: mockToken, 
+    claims, 
+    redirectPath: `/portal/year${year}` 
+  };
 }
 
 const Login = ({ onLogin }) => {

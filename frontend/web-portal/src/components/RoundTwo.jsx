@@ -558,6 +558,7 @@ const RoundTwo = ({ loggedInYear, fragments: parentFragments = [], setFragments,
         triggerWord={triggerWord} 
         onComplete={handleJoyceWallComplete}
         fragments={fragments}
+        loggedInYear={loggedInYear}
       />
     );
   }

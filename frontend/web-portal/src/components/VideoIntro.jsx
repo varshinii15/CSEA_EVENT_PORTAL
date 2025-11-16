@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import strangerIntroVideo from '../assets/stranger-intro.mp4';
-import logo from '../assets/logo.png';
+import logo from '../assets/logo.jpeg';
 import './VideoIntro.css';
 
 const VideoIntro = ({ onComplete, onFadeInLogin }) => {
@@ -105,9 +105,10 @@ const VideoIntro = ({ onComplete, onFadeInLogin }) => {
       if (hasInteracted && videoDurationRef.current > 0) {
         const currentTime = video.currentTime;
         const totalDuration = videoDurationRef.current;
+        const timeRemaining = totalDuration - currentTime;
         
         // Hide video and trigger login fade-in 7 seconds before the end
-        if (totalDuration - currentTime <= 7 && !videoHidden) {
+        if (timeRemaining <= 7 && !videoHidden) {
           setVideoHidden(true);
           
           // Show cursor and exit fullscreen when login starts fading in
@@ -136,6 +137,24 @@ const VideoIntro = ({ onComplete, onFadeInLogin }) => {
           if (onFadeInLogin && !loginFadeStartedRef.current) {
             loginFadeStartedRef.current = true;
             onFadeInLogin();
+          }
+        }
+        
+        // Exponential audio fade-out in the last 7 seconds
+        if (timeRemaining <= 7 && timeRemaining > 0 && audio) {
+          // Exponential fade: volume decreases exponentially
+          // Using formula: volume = (timeRemaining / 7) ^ 2 for smooth exponential curve
+          const fadeProgress = timeRemaining / 7;
+          const volume = Math.pow(fadeProgress, 2); // Exponential curve
+          
+          if (audio.muted) {
+            audio.muted = false;
+          }
+          audio.volume = Math.max(0, Math.min(1, volume));
+          
+          // Also fade video audio if it's not muted
+          if (!video.muted) {
+            video.volume = Math.max(0, Math.min(1, volume));
           }
         }
       }
@@ -247,6 +266,8 @@ const VideoIntro = ({ onComplete, onFadeInLogin }) => {
     const handleVideoPlay = () => {
       if (audio.paused) {
         audio.currentTime = video.currentTime;
+        audio.muted = false;
+        audio.volume = 1;
         audio.play().catch(err => console.error('Audio sync play error:', err));
       }
     };
@@ -274,6 +295,8 @@ const VideoIntro = ({ onComplete, onFadeInLogin }) => {
       if (videoHidden && !video.paused) {
         if (audio.paused) {
           audio.currentTime = video.currentTime;
+          audio.muted = false;
+          audio.volume = 1;
           audio.play().catch(err => console.error('Audio continue play error:', err));
         } else {
           // Keep audio synced with hidden video
@@ -376,10 +399,13 @@ const VideoIntro = ({ onComplete, onFadeInLogin }) => {
       clearThanksTimers();
       document.body.style.cursor = 'none';
       if (videoRef.current) {
+        videoRef.current.muted = false;
         videoRef.current.play().catch(err => console.error('Video play error:', err));
       }
       if (audioRef.current) {
         audioRef.current.currentTime = 0;
+        audioRef.current.muted = false;
+        audioRef.current.volume = 1;
         audioRef.current.play().catch(err => console.error('Audio play error:', err));
       }
     }
@@ -389,23 +415,24 @@ const VideoIntro = ({ onComplete, onFadeInLogin }) => {
     return null;
   }
 
-  const showThanks = thanksPhase !== 'idle' && thanksPhase !== 'done' && thanksPhase !== 'delay2' && thanksPhase !== 'delay3';
+  // Keep overlay visible throughout all transitions (no gaps)
+  const showThanks = thanksPhase !== 'idle' && thanksPhase !== 'done';
   const isVisible = thanksPhase === 'visible' || thanksPhase === 'visible2' || thanksPhase === 'visible3';
   const isHiding = thanksPhase === 'hiding' || thanksPhase === 'hiding2' || thanksPhase === 'hiding3';
+  const isDelaying = thanksPhase === 'delay2' || thanksPhase === 'delay3';
 
   return (
     <div 
-      className={`video-intro-container ${videoHidden ? 'video-hidden' : ''} ${showThanks ? 'showing-thanks' : ''} thanks-phase-${thanksPhase}`}
+      className={`video-intro-container ${!hasInteracted ? 'waiting-interaction' : ''} ${videoHidden ? 'video-hidden' : ''} ${showThanks ? 'showing-thanks' : ''} thanks-phase-${thanksPhase}`}
       onClick={handleInteraction}
       onTouchStart={handleInteraction}
       style={{ cursor: !hasInteracted ? 'pointer' : showThanks ? 'default' : 'none' }}
     >
-      {/* Video element - muted, for visual only */}
+      {/* Video element - with audio */}
       <video
         ref={videoRef}
         className={`intro-video ${videoHidden ? 'hidden' : ''}`}
         src={strangerIntroVideo}
-        muted
         playsInline
         preload="auto"
         style={{
@@ -453,9 +480,9 @@ const VideoIntro = ({ onComplete, onFadeInLogin }) => {
 
       {showThanks && (
         <div
-          className={`thanks-overlay ${isVisible ? 'visible' : ''} ${isHiding ? 'hiding' : ''}`}
+          className={`thanks-overlay ${isVisible ? 'visible' : ''} ${isHiding ? 'hiding' : ''} ${isDelaying ? 'delaying' : ''}`}
         >
-          <div className="thanks-content">
+          <div className={`thanks-content ${isDelaying ? 'content-hidden' : ''}`}>
             <span className="thanks-title">Thanks to</span>
             <div className="thanks-divider-line"></div>
             {thanksScreen === 1 ? (

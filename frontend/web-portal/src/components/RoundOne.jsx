@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import roundOneBgVideo from '../assets/roundone-bg.mp4';
 import roundOneRewardVideo from '../assets/round-one-reward .mp4'; // Note: filename has a space
+import Crossword from './Crossword';
 
-const RoundOne = ({ onComplete }) => {
+const RoundOne = ({ loggedInYear, onComplete }) => {
   const [diceValue, setDiceValue] = useState(1);
   const [isDiceRolling, setIsDiceRolling] = useState(false);
   const [showDicePopup, setShowDicePopup] = useState(true); // Always visible by default
@@ -14,6 +15,7 @@ const RoundOne = ({ onComplete }) => {
   const [answer, setAnswer] = useState('');
   const [error, setError] = useState('');
   const [isCompleted, setIsCompleted] = useState(false);
+  const [completedQuestions, setCompletedQuestions] = useState(new Set()); // Track completed question IDs
   const [showRewardVideo, setShowRewardVideo] = useState(false);
   const [showCompletionMessage, setShowCompletionMessage] = useState(false);
   const [showLine1, setShowLine1] = useState(false);
@@ -46,7 +48,7 @@ const RoundOne = ({ onComplete }) => {
   const correctAnswers = {
     1: "THE UPSIDE DOWN",
     2: "JANE",
-    3: "HAWKINS",
+    3: "CROSSWORD", // Crossword is handled by the Crossword component
     4: "UPSIDE DOWN",
     5: "PROGRAMMING",
     6: "PORTAL"
@@ -125,14 +127,23 @@ const RoundOne = ({ onComplete }) => {
 
   // Roll dice on simple click
   const handleOverlayClick = () => {
-    if (!expandedCard && !isCompleted && !isDiceRolling) {
+    if (!expandedCard && !isDiceRolling) {
       rollDice();
     }
   };
 
   // Realistic dice rolling animation with true randomness
   const rollDice = () => {
-    if (isDiceRolling || expandedCard || isCompleted) return;
+    if (isDiceRolling || expandedCard) return;
+    
+    // Get available (incomplete) questions
+    const availableQuestions = [1, 2, 3, 4, 5, 6].filter(id => !completedQuestions.has(id));
+    
+    // If all questions are completed, show reward video
+    if (availableQuestions.length === 0) {
+      setShowRewardVideo(true);
+      return;
+    }
     
     setIsDiceRolling(true);
     setMouseRotation({ x: 0, y: 0 }); // Reset rotation when rolling
@@ -140,24 +151,20 @@ const RoundOne = ({ onComplete }) => {
     
     // Use crypto.getRandomValues for better randomness if available, fallback to Math.random
     const getRandomValue = () => {
-      if (window.crypto && window.crypto.getRandomValues) {
-        const array = new Uint32Array(1);
-        window.crypto.getRandomValues(array);
-        return (array[0] % 6) + 1;
-      }
-      // Fallback to Math.random with better distribution
-      return Math.floor(Math.random() * 6) + 1;
+      // Get random value from available questions only
+      const randomIndex = Math.floor(Math.random() * availableQuestions.length);
+      return availableQuestions[randomIndex];
     };
     
-    // Rapidly change dice values during roll for visual effect
+    // Rapidly change dice values during roll for visual effect (only from available questions)
     const rollInterval = setInterval(() => {
-      const randomValue = getRandomValue();
-      setDiceValue(randomValue);
+      const randomIndex = Math.floor(Math.random() * availableQuestions.length);
+      setDiceValue(availableQuestions[randomIndex]);
     }, 50); // Update every 50ms for smoother visual effect
 
     setTimeout(() => {
       clearInterval(rollInterval);
-      // Generate final random value (truly random each time)
+      // Generate final random value from available questions only
       const finalValue = getRandomValue();
       setDiceValue(finalValue);
       setIsDiceRolling(false);
@@ -209,6 +216,11 @@ const RoundOne = ({ onComplete }) => {
     e.preventDefault();
     if (!expandedCard) return;
 
+    // Skip validation for crossword - it's handled by the Crossword component
+    if (expandedCard === 3) {
+      return;
+    }
+
     const userAnswer = answer.trim().toUpperCase();
     const correct = correctAnswers[expandedCard].toUpperCase();
 
@@ -216,11 +228,33 @@ const RoundOne = ({ onComplete }) => {
       setIsCompleted(true);
       setError('');
       
-      // Show reward video after a short delay
-      setTimeout(() => {
-        setExpandedCard(null); // Close the challenge view
-        setShowRewardVideo(true);
-      }, 1000);
+      // Mark this question as completed and check if all are done
+      setCompletedQuestions(prev => {
+        const newCompleted = new Set([...prev, expandedCard]);
+        // Check if all questions are completed
+        if (newCompleted.size === 6) {
+          // All questions completed, show reward video after closing
+          setTimeout(() => {
+            setExpandedCard(null);
+            setPreviewCardId(null);
+            setIsCompleted(false);
+            setAnswer('');
+            setError('');
+            setShowRewardVideo(true);
+          }, 1000);
+        } else {
+          // Close the challenge view and allow rolling again
+          setTimeout(() => {
+            setExpandedCard(null);
+            setPreviewCardId(null);
+            setIsCompleted(false);
+            setAnswer('');
+            setError('');
+            setShowDicePopup(true);
+          }, 1000);
+        }
+        return newCompleted;
+      });
     } else {
       setError('Incorrect answer. Try again!');
     }
@@ -283,16 +317,52 @@ const RoundOne = ({ onComplete }) => {
         } catch (err) {
           console.log('Fullscreen error:', err);
         }
-        // Hide cursor
+        // Hide cursor on body, video, and fullscreen element
         document.body.style.cursor = 'none';
+        video.style.cursor = 'none';
+        const fsEl = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+        if (fsEl) {
+          fsEl.style.cursor = 'none';
+        }
       };
       
+      // Aggressive cursor hiding - continuously hide cursor while video is playing
+      const hideCursorAggressively = () => {
+        // Hide cursor as long as video hasn't ended (regardless of play/pause state)
+        if (!video.ended) {
+          document.body.style.cursor = 'none';
+          video.style.cursor = 'none';
+          const fsEl = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+          if (fsEl) {
+            fsEl.style.cursor = 'none';
+          }
+          // Also hide on document and html
+          document.documentElement.style.cursor = 'none';
+        }
+      };
+
       const playVideo = async () => {
         try {
+          // Ensure video starts from the beginning
+          video.currentTime = 0;
           await enterFullscreen();
+          // Hide cursor immediately when video starts
+          hideCursorAggressively();
           await video.play();
         } catch (err) {
           console.log('Reward video play error:', err);
+        }
+      };
+
+      // Ensure cursor stays hidden during video playback
+      const handleVideoPlay = () => {
+        hideCursorAggressively();
+      };
+
+      const handleVideoPause = () => {
+        // Keep cursor hidden even when paused - video hasn't ended yet
+        if (!video.ended) {
+          hideCursorAggressively();
         }
       };
       
@@ -344,20 +414,47 @@ const RoundOne = ({ onComplete }) => {
       const onFullscreenChange = () => {
         const active = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
         setIsFullscreen(active);
+        // Immediately hide cursor when fullscreen changes
+        hideCursorAggressively();
       };
+
+      // Continuous interval to ensure cursor stays hidden
+      const cursorHideInterval = setInterval(() => {
+        if (!video.ended) {
+          hideCursorAggressively();
+        }
+      }, 100); // Check every 100ms
+
+      // Also hide cursor on any mouse movement during video
+      const handleMouseMove = () => {
+        if (!video.ended) {
+          hideCursorAggressively();
+        }
+      };
+
+      document.addEventListener('mousemove', handleMouseMove);
       
       playVideo();
       
       video.addEventListener('ended', handleVideoEnd);
+      video.addEventListener('play', handleVideoPlay);
+      video.addEventListener('pause', handleVideoPause);
+      video.addEventListener('timeupdate', hideCursorAggressively); // Hide on every time update
       document.addEventListener('fullscreenchange', onFullscreenChange);
       document.addEventListener('webkitfullscreenchange', onFullscreenChange);
       document.addEventListener('mozfullscreenchange', onFullscreenChange);
       document.addEventListener('MSFullscreenChange', onFullscreenChange);
       
       return () => {
+        clearInterval(cursorHideInterval);
+        document.removeEventListener('mousemove', handleMouseMove);
         video.removeEventListener('ended', handleVideoEnd);
+        video.removeEventListener('play', handleVideoPlay);
+        video.removeEventListener('pause', handleVideoPause);
+        video.removeEventListener('timeupdate', hideCursorAggressively);
         // Cleanup: restore cursor and exit fullscreen
         document.body.style.cursor = '';
+        document.documentElement.style.cursor = '';
         exitFullscreenSafe();
         document.removeEventListener('fullscreenchange', onFullscreenChange);
         document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
@@ -416,9 +513,12 @@ const RoundOne = ({ onComplete }) => {
             autoPlay
             playsInline
             preload="auto"
-            controls={false}
-            disablePictureInPicture
-            disableRemotePlayback
+            onLoadedData={() => {
+              // Ensure video starts from beginning when data is loaded
+              if (rewardVideoRef.current) {
+                rewardVideoRef.current.currentTime = 0;
+              }
+            }}
             style={{
               width: '100vw',
               height: '100vh',
@@ -570,12 +670,16 @@ const RoundOne = ({ onComplete }) => {
             <source src={roundOneBgVideo} type="video/mp4" />
           </video>
           
-          <div className="expanded-card-hero-content">
-            <div className="save-max-banner">
-              <p className="save-max-text">Complete this round to save Max</p>
-            </div>
-            <h3 className="expanded-challenge-title">{currentChallenge.title}</h3>
-            <p className="expanded-challenge-desc">{currentChallenge.description}</p>
+          <div className={`expanded-card-hero-content ${currentChallenge?.type === 'crossword' ? 'crossword-full-width' : ''}`}>
+            {currentChallenge.type !== 'crossword' && (
+              <>
+                <div className="save-max-banner">
+                  <p className="save-max-text">Complete this round to save Max</p>
+                </div>
+                <h3 className="expanded-challenge-title">{currentChallenge.title}</h3>
+                <p className="expanded-challenge-desc">{currentChallenge.description}</p>
+              </>
+            )}
             
             <div className="expanded-challenge-display">
               {currentChallenge.type === 'binary' && (
@@ -590,8 +694,48 @@ const RoundOne = ({ onComplete }) => {
                 </div>
               )}
               {currentChallenge.type === 'crossword' && (
-                <div className="challenge-display-box">
-                  <p className="challenge-text-large">{currentChallenge.challenge}</p>
+                <div style={{ 
+                  width: '100%',
+                  height: '100%',
+                  background: 'transparent', 
+                  border: 'none', 
+                  padding: 0,
+                  margin: 0
+                }}>
+                  <Crossword 
+                    year={loggedInYear || '1st'} 
+                    onComplete={() => {
+                      setIsCompleted(true);
+                      setError('');
+                      // Mark crossword (id 3) as completed and check if all are done
+                      setCompletedQuestions(prev => {
+                        const newCompleted = new Set([...prev, 3]);
+                        // Check if all questions are completed
+                        if (newCompleted.size === 6) {
+                          // All questions completed, show reward video after closing
+                          setTimeout(() => {
+                            setExpandedCard(null);
+                            setPreviewCardId(null);
+                            setIsCompleted(false);
+                            setAnswer('');
+                            setError('');
+                            setShowRewardVideo(true);
+                          }, 1000);
+                        } else {
+                          // Close the challenge view and allow rolling again
+                          setTimeout(() => {
+                            setExpandedCard(null);
+                            setPreviewCardId(null);
+                            setIsCompleted(false);
+                            setAnswer('');
+                            setError('');
+                            setShowDicePopup(true);
+                          }, 1000);
+                        }
+                        return newCompleted;
+                      });
+                    }}
+                  />
                 </div>
               )}
               {currentChallenge.type === 'riddle' && (
@@ -613,21 +757,23 @@ const RoundOne = ({ onComplete }) => {
               )}
             </div>
 
-            <form onSubmit={handleAnswerSubmit} className="expanded-answer-form">
-              <input
-                type="text"
-                value={answer}
-                onChange={(e) => setAnswer(e.target.value)}
-                placeholder="Enter your answer"
-                className="expanded-answer-input"
-                required
-                autoFocus
-                disabled={isCompleted}
-              />
-              <button type="submit" className="expanded-submit-button" disabled={isCompleted}>
-                {isCompleted ? '✓ Completed!' : 'Submit Answer'}
-              </button>
-            </form>
+            {currentChallenge.type !== 'crossword' && (
+              <form onSubmit={handleAnswerSubmit} className="expanded-answer-form">
+                <input
+                  type="text"
+                  value={answer}
+                  onChange={(e) => setAnswer(e.target.value)}
+                  placeholder="Enter your answer"
+                  className="expanded-answer-input"
+                  required
+                  autoFocus
+                  disabled={isCompleted}
+                />
+                <button type="submit" className="expanded-submit-button" disabled={isCompleted}>
+                  {isCompleted ? '✓ Completed!' : 'Submit Answer'}
+                </button>
+              </form>
+            )}
 
             {error && (
               <div className={`expanded-message ${error.includes('Correct') ? 'success' : 'error'}`}>
@@ -660,6 +806,9 @@ const RoundOne = ({ onComplete }) => {
                 style={previewCardId === task.id ? { visibility: 'hidden' } : undefined}
               >
                 <div className="card-front">
+                  {completedQuestions.has(task.id) && (
+                    <div className="card-completed-checkmark">✓</div>
+                  )}
                   <div className="card-number">{task.id}</div>
                   <div className="card-title-small">{task.title}</div>
                 </div>

@@ -1,0 +1,207 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&display=swap');
+
+/* Credits Container */
+.credits-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: #000000;
+  z-index: 20000;
+  overflow: hidden;
+}
+
+/* Scrolling Container */
+.credits-scroll {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+  outline: none;
+  caret-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+.credits-scroll::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
+}
+
+.credits-scroll:focus {
+  outline: none;
+  caret-color: transparent;
+}
+
+/* Credits Content */
+.credits-content {
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 100vh 0 100vh 0; /* Top padding pushes content below, bottom padding for final message */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  caret-color: transparent;
+}
+
+/* Opening Title */
+.credits-opening {
+  text-align: center;
+  margin-bottom: 8rem;
+}
+
+.credits-main-title {
+  font-family: 'Cinzel', serif;
+  font-size: 4rem;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  margin-bottom: 2rem;
+  line-height: 1.2;
+}
+
+.credits-main-subtitle {
+  font-family: 'Cinzel', serif;
+  font-size: 1.5rem;
+  font-weight: 400;
+  color: #ffffff;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+/* Section */
+.credits-section {
+  width: 100%;
+  text-align: center;
+  margin-bottom: 6rem;
+}
+
+.credits-section-title {
+  font-family: 'Cinzel', serif;
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  margin-bottom: 1.5rem;
+}
+
+.credits-divider {
+  width: 200px;
+  height: 2px;
+  background: #ffffff;
+  margin: 0 auto 3rem auto;
+}
+
+/* Credit Item */
+.credits-item {
+  margin-bottom: 2rem;
+}
+
+.credits-role {
+  font-family: 'Cinzel', serif;
+  font-size: 1rem;
+  font-weight: 400;
+  color: #ffffff;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  margin-bottom: 0.5rem;
+  opacity: 0.7;
+}
+
+.credits-name {
+  font-family: 'Cinzel', serif;
+  font-size: 1.8rem;
+  font-weight: 600;
+  color: #ffffff;
+  letter-spacing: 0.1em;
+}
+
+/* Closing Message */
+.credits-closing {
+  text-align: center;
+  margin-top: 8rem;
+}
+
+.credits-closing-line {
+  font-family: 'Cinzel', serif;
+  font-size: 3rem;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  margin-bottom: 2rem;
+  line-height: 1.3;
+}
+
+.credits-logo {
+  font-family: 'Cinzel', serif;
+  font-size: 1.5rem;
+  font-weight: 400;
+  color: #ffffff;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  margin-top: 4rem;
+  padding-top: 2rem;
+  border-top: 2px solid #ffffff;
+  display: inline-block;
+  padding-left: 2rem;
+  padding-right: 2rem;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .credits-content {
+    max-width: 90%;
+    padding: 80vh 0 80vh 0;
+  }
+
+  .credits-main-title {
+    font-size: 2.5rem;
+    letter-spacing: 0.15em;
+  }
+
+  .credits-main-subtitle {
+    font-size: 1.2rem;
+    letter-spacing: 0.2em;
+  }
+
+  .credits-section-title {
+    font-size: 1.8rem;
+    letter-spacing: 0.15em;
+  }
+
+  .credits-divider {
+    width: 150px;
+    margin-bottom: 2rem;
+  }
+
+  .credits-name {
+    font-size: 1.4rem;
+  }
+
+  .credits-role {
+    font-size: 0.9rem;
+  }
+
+  .credits-closing-line {
+    font-size: 2rem;
+    letter-spacing: 0.15em;
+  }
+
+  .credits-logo {
+    font-size: 1.2rem;
+    letter-spacing: 0.2em;
+  }
+}
