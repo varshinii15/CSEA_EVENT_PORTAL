@@ -125,11 +125,36 @@ export const getallquestion = async (req, res) => {
             Questions.find(filter),
             steg.find(filter)
         ]);
+const combined = [
+  ...questions.map((q, index) => ({
+    _id: q._id,
+    id: index + 1,
+    title: q.title,
+    description: q.descp,      // ★ normalize descp → description
+    challenge: q.qn,           // ★ normalize qn → challenge
+    answer: q.ans,             // ★ normalize ans → answer
+    type: q.type,
+    hint: q.hint || null,
+    yr: q.yr,
+    source: "roundone"
+  })),
 
-        const combined = [
-            ...questions.map(q => ({ ...q.toObject(), source: 'roundone' })),
-            ...stegQuestions.map(s => ({ ...s.toObject(), source: 'steg' }))
-        ];
+  ...stegQuestions.map((s, index) => ({
+    _id: s._id,
+    id: questions.length + index + 1,
+    title: s.title,
+    description: s.descp,
+    challenge: s.qn,
+    answer: s.ans,
+    type: s.type,
+    hint: s.hint || null,
+    url: s.url || null,
+    yr: s.yr,
+    source: "steg"
+  }))
+];
+
+
 
         if (combined.length === 0) {
             return res.status(404).json({
@@ -144,12 +169,13 @@ export const getallquestion = async (req, res) => {
             counts: { roundone: questions.length, steg: stegQuestions.length },
             data: combined,
         });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: "internal server error"
-        });
-    }
+    }  catch (error) {
+    console.error("GET ALL QUESTION ERROR:", error);
+    res.status(500).json({
+        success: false,
+        message: error.message,
+    });
+}
 }
 // ...existing code...
 export const getqnbyId=async(req,res)=>{
