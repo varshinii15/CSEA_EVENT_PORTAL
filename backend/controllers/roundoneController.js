@@ -122,10 +122,7 @@ export const getallquestion = async (req, res) => {
         const filter = Number.isNaN(parsedYr) ? { yr } : { yr: parsedYr };
 
         // support crosswords that may use either `yr` or `year` field
-        const crosswordFilter = Number.isNaN(parsedYr)
-          ? { $or: [{ yr }, { year: yr }] }
-          : { $or: [{ yr: parsedYr }, { year: parsedYr }] };
-
+        const crosswordFilter = filter;
         const [questions, stegQuestions, crosswords] = await Promise.all([
             Questions.find(filter),
             steg.find(filter),
@@ -165,12 +162,12 @@ export const getallquestion = async (req, res) => {
             id: questions.length + stegQuestions.length + index + 1,
             title: c.title || `Crossword ${index + 1}`,
             description: c.description || null,
-            // supply the answers object as the "challenge" so frontend can render crossword entries
-            challenge: c.answers || {},
-            answer: null,
-            type: "crossword",
-            hint: null,
-            yr: c.yr ?? c.year ?? parsedYr,
+            // Only expose structure, not answers
+           challenge: {
+              across: Object.keys(c.answers?.across || {}),
+              down: Object.keys(c.answers?.down || {})
+            },
+            answer: null,  // Never expose answers
             source: "crossword"
           }))
         ];
@@ -302,7 +299,7 @@ export const createCrossword = async (req, res) => {
     if (Number.isNaN(y)) return res.status(400).json({ success: false, message: 'valid year required' });
 
     // Mongoose Map accepts plain objects for storage
-    const created = await Crossword.create({ answers, year: y });
+    const created = await Crossword.create({ answers, yr: y });
     return res.status(201).json({ success: true, data: created });
   } catch (err) {
     return res.status(400).json({ success: false, message: err.message });

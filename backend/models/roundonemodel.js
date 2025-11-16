@@ -24,7 +24,7 @@ const crossword = new mongoose.Schema({
     }
   },
   yr: {
-    type: Number,enum:[1,2]
+    type: Number,enum: [1,2]
   }
 })
 
