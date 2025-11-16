@@ -8,5 +8,28 @@ const qnsans=new mongoose.Schema({
     yr:{type:Number,enum:[1,2]}
 })
 
+
+
+const crossword = new mongoose.Schema({
+  answers: {
+    across: {
+      type: Map,
+      of: String,
+      required: true
+    },
+    down: {
+      type: Map,
+      of: String,
+      required: true
+    }
+  },
+  yr: {
+    type: Number,enum: [1,2]
+  }
+})
+
+
+export const Crossword = mongoose.model('Crossword', crossword, 'crosswords');
+
 const roundone=mongoose.model('roundone',qnsans);
-export default roundone
+export default roundone;

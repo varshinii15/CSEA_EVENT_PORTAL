@@ -1,4 +1,4 @@
-import Questions from "../models/roundonemodel.js"
+import Questions,{Crossword} from "../models/roundonemodel.js"
 import steg from "../models/stegmodels.js"
 
 export const addqn=async(req,res)=>{
@@ -110,7 +110,7 @@ export const getstegqnbyyear=async(req,res)=>{
 // ...existing code...
 export const getallquestion = async (req, res) => {
     try {
-        const { yr } = req.query;
+        const { yr } = req.params;
         if (!yr) {
             return res.status(400).json({
                 success: false,
@@ -121,14 +121,55 @@ export const getallquestion = async (req, res) => {
         const parsedYr = Number(yr);
         const filter = Number.isNaN(parsedYr) ? { yr } : { yr: parsedYr };
 
-        const [questions, stegQuestions] = await Promise.all([
+        // support crosswords that may use either `yr` or `year` field
+        const crosswordFilter = filter;
+        const [questions, stegQuestions, crosswords] = await Promise.all([
             Questions.find(filter),
-            steg.find(filter)
+            steg.find(filter),
+            Crossword.find(crosswordFilter)
         ]);
 
         const combined = [
-            ...questions.map(q => ({ ...q.toObject(), source: 'roundone' })),
-            ...stegQuestions.map(s => ({ ...s.toObject(), source: 'steg' }))
+          ...questions.map((q, index) => ({
+            _id: q._id,
+            id: index + 1,
+            title: q.title,
+            description: q.descp,
+            challenge: q.qn,
+            answer: q.ans,
+            type: q.type,
+            hint: q.hint || null,
+            yr: q.yr,
+            source: "roundone"
+          })),
+
+          ...stegQuestions.map((s, index) => ({
+            _id: s._id,
+            id: questions.length + index + 1,
+            title: s.title,
+            description: s.descp,
+            challenge: s.qn,
+            answer: s.ans,
+            type: s.type,
+            hint: s.hint || null,
+            url: s.url || null,
+            yr: s.yr,
+            source: "steg"
+          })),
+
+          ...crosswords.map((c, index) => ({
+            _id: c._id,
+            id: questions.length + stegQuestions.length + index + 1,
+            title: c.title || `Crossword ${index + 1}`,
+            description: c.description || null,
+            // Only expose structure, not answers
+           challenge: {
+              across: Object.keys(c.answers?.across || {}),
+              down: Object.keys(c.answers?.down || {})
+            },
+            answer: null,  // Never expose answers
+            source: "crossword"
+          }))
         ];
 
         if (combined.length === 0) {
@@ -141,15 +182,16 @@ export const getallquestion = async (req, res) => {
         res.status(200).json({
             success: true,
             count: combined.length,
-            counts: { roundone: questions.length, steg: stegQuestions.length },
+            counts: { roundone: questions.length, steg: stegQuestions.length, crossword: crosswords.length },
             data: combined,
         });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: "internal server error"
-        });
-    }
+    }  catch (error) {
+    console.error("GET ALL QUESTION ERROR:", error);
+    res.status(500).json({
+        success: false,
+        message: error.message,
+    });
+}
 }
 // ...existing code...
 export const getqnbyId=async(req,res)=>{
@@ -243,3 +285,24 @@ export const deleteqn = async (req, res) => {
     }
 }
 // ...existing code...
+
+export const createCrossword = async (req, res) => {
+  try {
+    const { answers, year } = req.body;
+    if (!answers || typeof answers !== 'object') {
+      return res.status(400).json({ success: false, message: 'answers object required' });
+    }
+    if (answers.across == null || answers.down == null) {
+      return res.status(400).json({ success: false, message: 'answers.across and answers.down required' });
+    }
+    const y = Number(year);
+    if (Number.isNaN(y)) return res.status(400).json({ success: false, message: 'valid year required' });
+
+    // Mongoose Map accepts plain objects for storage
+    const created = await Crossword.create({ answers, yr: y });
+    return res.status(201).json({ success: true, data: created });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+};
+

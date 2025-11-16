@@ -1,17 +1,28 @@
 import jwt from 'jsonwebtoken';
 export const verifyToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'] || '';
-  const parts = authHeader.split(' ');
-  if (parts.length !== 2 || parts[0] !== 'Bearer') {
-    return res.status(401).json({ message: 'Authorization header missing or malformed' });
+  
+    const authHeader = req.headers.authorization;
+
+  console.log("RAW HEADER:", req.headers.authorization);
+
+  if (!authHeader) {
+    return res.status(401).json({ message: "Authorization missing" });
   }
-  const token = parts[1];
+
+  const [scheme, token] = authHeader.split(" ");
+
+  if (scheme !== "Bearer" || !token) {
+    return res.status(401).json({ message: "Malformed token" });
+  }
+
+console.log("JWT_SECRET =", process.env.JWT_SECRET);
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded; 
     return next();
   } catch (err) {
+    console.log(err)
     return res.status(401).json({ message: 'Invalid or expired token' });
   }
 };

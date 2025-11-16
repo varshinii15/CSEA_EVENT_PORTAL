@@ -1,19 +1,90 @@
-import React, { useState, useRef, useEffect } from 'react';
-import roundOneBgVideo from '../assets/roundone-bg.mp4';
-import roundOneRewardVideo from '../assets/round-one-reward .mp4'; // Note: filename has a space
-import Crossword from './Crossword';
+import React, { useState, useRef, useEffect, useContext } from "react";
+import roundOneBgVideo from "../assets/roundone-bg.mp4";
+import roundOneRewardVideo from "../assets/round-one-reward .mp4"; // Note: filename has a space
+import { AuthContext } from "../context/AuthContext";
+import axios from "axios";
+import Crossword from "./Crossword";
+
+/*
+  Refactored RoundOne component
+  - Uses backend-driven questions (allQues state)
+  - Respects AuthContext token (AuthProvider should set axios.defaults.headers.common.Authorization)
+  - Robust loading / error handling
+  - Falls back to a small set of built-in tasks if fetch fails
+  - Maintains the dice + preview + expanded UX from your original file
+  - Answer validation uses backend-provided `answer` field when present, otherwise uses local mapping
+  - Supports Crossword component for crossword challenges
+
+  Usage notes:
+  - Ensure AuthProvider wraps the app so token is available in context and axios header is set.
+  - Endpoint expected: GET /api/v1/round1/getallquestion/:yr -> returns array of question objects
+    each question object should contain at minimum: { id, title, description, challenge, type, answer? }
+*/
+
+const BUILTIN_TASKS = [
+  {
+    id: 1,
+    title: "Binary Decoder",
+    description: "Decode this binary message to uncover a hidden clue",
+    challenge:
+      "01010100 01101000 01100101 00100000 01010101 01110000 01110011 01101001 01100100 01100101 00100000 01000100 01101111 01110111 01101110",
+    type: "binary",
+    answer: "THE UPSIDE DOWN",
+  },
+  {
+    id: 2,
+    title: "Stranger Things Quiz",
+    description: "Answer this question about Stranger Things",
+    challenge: "What is Eleven's real name?",
+    type: "quiz",
+    answer: "JANE",
+  },
+  {
+    id: 3,
+    title: "Crossword Challenge",
+    description: "Solve the tech and Stranger Things crossword",
+    challenge: "3-Down: Hawkins Lab's secret project (6 letters)",
+    type: "crossword",
+    answer: "HAWKINS",
+  },
+  {
+    id: 4,
+    title: "Upside Down Riddle",
+    description: "Crack this riddle related to the Upside Down",
+    challenge:
+      "In darkness I thrive, a mirror of your world, where monsters hide and shadows swirled. What am I?",
+    type: "riddle",
+    answer: "UPSIDE DOWN",
+  },
+  {
+    id: 5,
+    title: "Word Unscrambler",
+    description: "Unscramble this technical term",
+    challenge: "OGRAMPRMING",
+    type: "unscramble",
+    answer: "PROGRAMMING",
+  },
+  {
+    id: 6,
+    title: "Steganography Challenge",
+    description: "Find the hidden message in the image",
+    challenge: "Extract the hidden message from the steganographic image",
+    type: "steganography",
+    answer: "PORTAL",
+  },
+];
 
 const RoundOne = ({ loggedInYear, onComplete }) => {
   const [diceValue, setDiceValue] = useState(1);
   const [isDiceRolling, setIsDiceRolling] = useState(false);
-  const [showDicePopup, setShowDicePopup] = useState(true); // Always visible by default
-  const [previewCardId, setPreviewCardId] = useState(null); // Intermediate preview before full question
+  const [showDicePopup, setShowDicePopup] = useState(true);
+  const [previewCardId, setPreviewCardId] = useState(null);
   const [previewFromRect, setPreviewFromRect] = useState(null);
   const [previewTargetPos, setPreviewTargetPos] = useState(null);
   const [previewAnimActive, setPreviewAnimActive] = useState(false);
   const [expandedCard, setExpandedCard] = useState(null);
-  const [answer, setAnswer] = useState('');
-  const [error, setError] = useState('');
+  const [answer, setAnswer] = useState("");
+  const [error, setError] = useState("");
   const [isCompleted, setIsCompleted] = useState(false);
   const [completedQuestions, setCompletedQuestions] = useState(new Set()); // Track completed question IDs
   const [showRewardVideo, setShowRewardVideo] = useState(false);
@@ -21,7 +92,6 @@ const RoundOne = ({ loggedInYear, onComplete }) => {
   const [showLine1, setShowLine1] = useState(false);
   const [showLine2, setShowLine2] = useState(false);
   const [showBlackOverlay, setShowBlackOverlay] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [showVignette, setShowVignette] = useState(false);
   const [mouseRotation, setMouseRotation] = useState({ x: 0, y: 0 });
   const diceRef = useRef(null);
@@ -30,21 +100,25 @@ const RoundOne = ({ loggedInYear, onComplete }) => {
   const rewardVideoRef = useRef(null);
   const cardRefs = useRef({});
 
+  const [allQues, setAllQues] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState(null);
 
-  // Function to get dice transform based on value
-  const getDiceTransform = (value) => {
-    const transforms = {
-      1: 'rotateX(0deg) rotateY(0deg)',
-      2: 'rotateX(0deg) rotateY(-90deg)',
-      3: 'rotateX(-90deg) rotateY(0deg)',
-      4: 'rotateX(90deg) rotateY(0deg)',
-      5: 'rotateX(0deg) rotateY(90deg)',
-      6: 'rotateX(180deg) rotateY(0deg)'
-    };
-    return transforms[value] || transforms[1];
-  };
+  const year = loggedInYear === "1st" ? 1 : 2;
+  const { token, logout } = useContext(AuthContext) || {};
 
-  // Correct answers for each challenge
+  // Helper transforms for dice
+  const getDiceTransform = (value) =>
+    ({
+      1: "rotateX(0deg) rotateY(0deg)",
+      2: "rotateX(0deg) rotateY(-90deg)",
+      3: "rotateX(-90deg) rotateY(0deg)",
+      4: "rotateX(90deg) rotateY(0deg)",
+      5: "rotateX(0deg) rotateY(90deg)",
+      6: "rotateX(180deg) rotateY(0deg)",
+    }[value] || "rotateX(0deg) rotateY(0deg)");
+
+  // Correct answers for fallback (when backend doesn't provide answer field)
   const correctAnswers = {
     1: "THE UPSIDE DOWN",
     2: "JANE",
@@ -54,75 +128,91 @@ const RoundOne = ({ loggedInYear, onComplete }) => {
     6: "PORTAL"
   };
 
-  const tasks = [
-    {
-      id: 1,
-      title: "Binary Decoder",
-      description: "Decode this binary message to uncover a hidden clue",
-      challenge: "01010100 01101000 01100101 00100000 01010101 01110000 01110011 01101001 01100100 01100101 00100000 01000100 01101111 01110111 01101110",
-      type: "binary"
-    },
-    {
-      id: 2,
-      title: "Stranger Things Quiz",
-      description: "Answer this question about Stranger Things",
-      challenge: "What is Eleven's real name?",
-      type: "quiz"
-    },
-    {
-      id: 3,
-      title: "Crossword Challenge",
-      description: "Solve the tech and Stranger Things crossword",
-      challenge: "3-Down: Hawkins Lab's secret project (6 letters)",
-      type: "crossword"
-    },
-    {
-      id: 4,
-      title: "Upside Down Riddle",
-      description: "Crack this riddle related to the Upside Down",
-      challenge: "In darkness I thrive, a mirror of your world, where monsters hide and shadows swirled. What am I?",
-      type: "riddle"
-    },
-    {
-      id: 5,
-      title: "Word Unscrambler",
-      description: "Unscramble this technical term",
-      challenge: "OGRAMPRMING",
-      type: "unscramble"
-    },
-    {
-      id: 6,
-      title: "Steganography Challenge",
-      description: "Find the hidden message in the image",
-      challenge: "Extract the hidden message from the steganographic image",
-      type: "steganography"
-    }
-  ];
+  // Use backend-provided answer when available; fallback to builtin map
+  const builtinAnswerMap = BUILTIN_TASKS.reduce(
+    (acc, t) => ({ ...acc, [t.id]: t.answer }),
+    {}
+  );
 
-  // Handle mouse move anywhere in overlay to rotate dice following cursor
+  // Fetch questions when token or year changes
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+
+    async function fetchQues() {
+      if (!token) {
+        setAllQues([]);
+        return;
+      }
+
+      setLoading(true);
+      setFetchError(null);
+
+      try {
+        const res = await axios.get(
+          `http://localhost:5000/api/v1/round1/getallquestion/${year}`,
+          { signal: controller.signal }
+        );
+        console.log(res.data.data)
+
+        if (cancelled) return;
+
+        if (Array.isArray(res.data?.data)) {
+          setAllQues(res.data.data); // 🎉 Your backend data
+        } else {
+          console.warn("Unexpected shape:", res.data);
+          if (!allQues.length) setAllQues(BUILTIN_TASKS);
+        }
+      } catch (err) {
+        if (err.code === "ERR_CANCELED" || err.name === "CanceledError") {
+          return; // React StrictMode 2nd render cancel
+        }
+
+        console.error("Fetch error:", err);
+        setFetchError(err);
+
+        if (!allQues.length) {
+          setAllQues(BUILTIN_TASKS);
+        }
+
+        if (err.response && err.response.status === 401) {
+          console.warn("Unauthorized - token expired");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    fetchQues();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [token, year]);
+
+  // derived current/preview challenge using backend data
+  const currentChallenge = expandedCard
+    ? allQues.find((q) => Number(q.id) === Number(expandedCard))
+    : null;
+  const previewChallenge = previewCardId
+    ? allQues.find((q) => Number(q.id) === Number(previewCardId))
+    : null;
+
+  // mouse rotations
   const handleMouseMove = (e) => {
     if (isDiceRolling || expandedCard || isCompleted) return;
-    
-    // Calculate rotation based on cursor position relative to viewport center
     const centerX = window.innerWidth / 2;
     const centerY = window.innerHeight / 2;
-    
     const deltaX = e.clientX - centerX;
     const deltaY = e.clientY - centerY;
-    
-    // Calculate rotation based on mouse position (limit rotation for smoother effect)
-    const maxRotation = 30; // Limit rotation to prevent excessive spinning
+    const maxRotation = 30;
     const rotateY = (deltaX / centerX) * maxRotation;
     const rotateX = -(deltaY / centerY) * maxRotation;
-    
     setMouseRotation({ x: rotateX, y: rotateY });
   };
-
-  // Handle mouse leave overlay to reset rotation
   const handleMouseLeave = () => {
-    if (!isDiceRolling) {
-      setMouseRotation({ x: 0, y: 0 });
-    }
+    if (!isDiceRolling) setMouseRotation({ x: 0, y: 0 });
   };
 
   // Roll dice on simple click
@@ -134,10 +224,13 @@ const RoundOne = ({ loggedInYear, onComplete }) => {
 
   // Realistic dice rolling animation with true randomness
   const rollDice = () => {
-    if (isDiceRolling || expandedCard) return;
+    if (isDiceRolling || expandedCard || isCompleted) return;
     
-    // Get available (incomplete) questions
-    const availableQuestions = [1, 2, 3, 4, 5, 6].filter(id => !completedQuestions.has(id));
+    // Get available questions (from backend or builtin)
+    const questionsToUse = Array.isArray(allQues) && allQues.length ? allQues : BUILTIN_TASKS;
+    const availableQuestions = questionsToUse
+      .map(q => Number(q.id))
+      .filter(id => !completedQuestions.has(id));
     
     // If all questions are completed, show reward video
     if (availableQuestions.length === 0) {
@@ -146,10 +239,9 @@ const RoundOne = ({ loggedInYear, onComplete }) => {
     }
     
     setIsDiceRolling(true);
-    setMouseRotation({ x: 0, y: 0 }); // Reset rotation when rolling
-    const rollDuration = 2000; // 2 seconds
-    
-    // Use crypto.getRandomValues for better randomness if available, fallback to Math.random
+    setMouseRotation({ x: 0, y: 0 });
+    const rollDuration = 1800;
+
     const getRandomValue = () => {
       // Get random value from available questions only
       const randomIndex = Math.floor(Math.random() * availableQuestions.length);
@@ -168,34 +260,31 @@ const RoundOne = ({ loggedInYear, onComplete }) => {
       const finalValue = getRandomValue();
       setDiceValue(finalValue);
       setIsDiceRolling(false);
-      
-      // After roll, show a centered preview first, then allow tap to continue
+
+      // show preview fly animation
       setTimeout(() => {
         setShowDicePopup(false);
-        setTimeout(() => {
-          const el = cardRefs.current[finalValue];
-          if (el) {
-            const rect = el.getBoundingClientRect();
-            const targetLeft = (window.innerWidth - rect.width) / 2;
-            const targetTop = (window.innerHeight - rect.height) / 2;
-            setPreviewFromRect({
-              left: rect.left,
-              top: rect.top,
-              width: rect.width,
-              height: rect.height
-            });
-            setPreviewTargetPos({ left: targetLeft, top: targetTop });
-          } else {
-            setPreviewFromRect(null);
-            setPreviewTargetPos(null);
-          }
-          setPreviewCardId(finalValue);
-        }, 200);
-      }, 200);
+        const el = cardRefs.current[finalValue];
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          const targetLeft = (window.innerWidth - rect.width) / 2;
+          const targetTop = (window.innerHeight - rect.height) / 2;
+          setPreviewFromRect({
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+          });
+          setPreviewTargetPos({ left: targetLeft, top: targetTop });
+        } else {
+          setPreviewFromRect(null);
+          setPreviewTargetPos(null);
+        }
+        setPreviewCardId(finalValue);
+      }, 160);
     }, rollDuration);
   };
 
-  // Get combined transform for dice (mouse rotation + value rotation)
   const getDiceTransformWithMouse = () => {
     const baseTransform = getDiceTransform(diceValue);
     
@@ -212,300 +301,208 @@ const RoundOne = ({ loggedInYear, onComplete }) => {
     return `${baseTransform} ${mouseTransform}`;
   };
 
-  const handleAnswerSubmit = (e) => {
+  // submit answer
+  const handleAnswerSubmit = async (e) => {
     e.preventDefault();
-    if (!expandedCard) return;
+    if (!expandedCard || !currentChallenge) return;
 
     // Skip validation for crossword - it's handled by the Crossword component
-    if (expandedCard === 3) {
+    if (currentChallenge.type === 'crossword' || currentChallenge.source === 'crossword') {
       return;
     }
 
-    const userAnswer = answer.trim().toUpperCase();
-    const correct = correctAnswers[expandedCard].toUpperCase();
+    const userAnswer = (answer || "").trim();
+    if (!userAnswer) return setError("Please type an answer");
 
-    if (userAnswer === correct) {
-      setIsCompleted(true);
-      setError('');
-      
-      // Mark this question as completed and check if all are done
-      setCompletedQuestions(prev => {
-        const newCompleted = new Set([...prev, expandedCard]);
-        // Check if all questions are completed
-        if (newCompleted.size === 6) {
-          // All questions completed, show reward video after closing
-          setTimeout(() => {
-            setExpandedCard(null);
-            setPreviewCardId(null);
-            setIsCompleted(false);
-            setAnswer('');
-            setError('');
-            setShowRewardVideo(true);
-          }, 1000);
+    try {
+      setError("");
+
+      // If challenge has _id, use API; otherwise use local validation
+      if (currentChallenge._id) {
+        const res = await axios.post(
+          "http://localhost:5000/api/v1/round1/player/submit-answer",
+          {
+            questionId: currentChallenge._id,
+            userAnswer: userAnswer
+          }
+        );
+
+        const isCorrect = res?.data?.data?.isCorrect;
+
+        if (isCorrect) {
+          // SUCCESS UI
+          setIsCompleted(true);
+          setError('');
+          
+          // Mark this question as completed and check if all are done
+          setCompletedQuestions(prev => {
+            const newCompleted = new Set([...prev, expandedCard]);
+            // Check if all questions are completed
+            const questionsToUse = Array.isArray(allQues) && allQues.length ? allQues : BUILTIN_TASKS;
+            if (newCompleted.size === questionsToUse.length) {
+              // All questions completed, show reward video after closing
+              setTimeout(() => {
+                setExpandedCard(null);
+                setPreviewCardId(null);
+                setIsCompleted(false);
+                setAnswer('');
+                setError('');
+                setShowRewardVideo(true);
+              }, 1000);
+            } else {
+              // Close the challenge view and allow rolling again
+              setTimeout(() => {
+                setExpandedCard(null);
+                setPreviewCardId(null);
+                setIsCompleted(false);
+                setAnswer('');
+                setError('');
+                setShowDicePopup(true);
+              }, 1000);
+            }
+            return newCompleted;
+          });
         } else {
-          // Close the challenge view and allow rolling again
-          setTimeout(() => {
-            setExpandedCard(null);
-            setPreviewCardId(null);
-            setIsCompleted(false);
-            setAnswer('');
-            setError('');
-            setShowDicePopup(true);
-          }, 1000);
+          // WRONG ANSWER UI
+          setError("Incorrect answer. Try again!");
         }
-        return newCompleted;
-      });
-    } else {
-      setError('Incorrect answer. Try again!');
+      } else {
+        // Fallback to local validation
+        const normalizedUserAnswer = userAnswer.toUpperCase();
+        const correctAnswer = currentChallenge.answer || builtinAnswerMap[expandedCard] || correctAnswers[expandedCard];
+        const normalizedCorrect = (correctAnswer || "").toUpperCase();
+
+        if (normalizedUserAnswer === normalizedCorrect) {
+          setIsCompleted(true);
+          setError('');
+          
+          // Mark this question as completed and check if all are done
+          setCompletedQuestions(prev => {
+            const newCompleted = new Set([...prev, expandedCard]);
+            const questionsToUse = Array.isArray(allQues) && allQues.length ? allQues : BUILTIN_TASKS;
+            if (newCompleted.size === questionsToUse.length) {
+              setTimeout(() => {
+                setExpandedCard(null);
+                setPreviewCardId(null);
+                setIsCompleted(false);
+                setAnswer('');
+                setError('');
+                setShowRewardVideo(true);
+              }, 1000);
+            } else {
+              setTimeout(() => {
+                setExpandedCard(null);
+                setPreviewCardId(null);
+                setIsCompleted(false);
+                setAnswer('');
+                setError('');
+                setShowDicePopup(true);
+              }, 1000);
+            }
+            return newCompleted;
+          });
+        } else {
+          setError("Incorrect answer. Try again!");
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      setError("Server error. Try again.");
     }
   };
 
-  const currentChallenge = expandedCard ? tasks[expandedCard - 1] : null;
-  const previewChallenge = previewCardId ? tasks[previewCardId - 1] : null;
-
-  // Trigger the fly-to-center animation after preview mounts
+  // preview animation trigger
   useEffect(() => {
     if (previewCardId && previewFromRect && previewTargetPos) {
       setPreviewAnimActive(false);
-      const rAF = requestAnimationFrame(() => {
-        setPreviewAnimActive(true);
-      });
-      return () => cancelAnimationFrame(rAF);
+      const r = requestAnimationFrame(() => setPreviewAnimActive(true));
+      return () => cancelAnimationFrame(r);
     }
-    return undefined;
   }, [previewCardId, previewFromRect, previewTargetPos]);
 
-  // Ensure background video plays WITH audio when question page opens
+  // Reward video handling
   useEffect(() => {
-    if (expandedCard && videoRef.current) {
-      const video = videoRef.current;
-      // Ensure video plays with audio
-      const playVideo = async () => {
-        try {
-          video.muted = false;
-          video.volume = 0.6;
-          await video.play();
-        } catch (err) {
-          console.log('Video play error:', err);
-        }
-      };
-      playVideo();
-      
-      return undefined;
-    }
-  }, [expandedCard]);
+    if (!showRewardVideo || !rewardVideoRef.current) return undefined;
+    const v = rewardVideoRef.current;
+    let cleaned = false;
 
-  // Handle reward video playback - play fully, then show message
-  useEffect(() => {
-    if (showRewardVideo && rewardVideoRef.current) {
-      const video = rewardVideoRef.current;
-      
-      // Enter fullscreen and hide cursor (use the video element itself)
-      const enterFullscreen = async () => {
-        try {
-          const el = video;
-          if (el.requestFullscreen) {
-            await el.requestFullscreen();
-          } else if (el.webkitRequestFullscreen) {
-            await el.webkitRequestFullscreen();
-          } else if (el.mozRequestFullScreen) {
-            await el.mozRequestFullScreen();
-          } else if (el.msRequestFullscreen) {
-            await el.msRequestFullscreen();
-          }
-          setIsFullscreen(true);
-        } catch (err) {
-          console.log('Fullscreen error:', err);
-        }
-        // Hide cursor on body, video, and fullscreen element
-        document.body.style.cursor = 'none';
-        video.style.cursor = 'none';
-        const fsEl = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
-        if (fsEl) {
-          fsEl.style.cursor = 'none';
-        }
-      };
-      
-      // Aggressive cursor hiding - continuously hide cursor while video is playing
-      const hideCursorAggressively = () => {
-        // Hide cursor as long as video hasn't ended (regardless of play/pause state)
-        if (!video.ended) {
-          document.body.style.cursor = 'none';
-          video.style.cursor = 'none';
-          const fsEl = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
-          if (fsEl) {
-            fsEl.style.cursor = 'none';
-          }
-          // Also hide on document and html
-          document.documentElement.style.cursor = 'none';
-        }
-      };
+    const enterFsAndPlay = async () => {
+      try {
+        if (v.requestFullscreen) await v.requestFullscreen();
+        else if (v.webkitRequestFullscreen) await v.webkitRequestFullscreen();
+        else if (v.mozRequestFullScreen) await v.mozRequestFullScreen();
+        else if (v.msRequestFullscreen) await v.msRequestFullscreen();
+        v.play().catch(() => {});
+        document.body.style.cursor = "none";
+      } catch (err) {
+        console.warn("Reward video play error", err);
+      }
+    };
 
-      const playVideo = async () => {
-        try {
-          // Ensure video starts from the beginning
-          video.currentTime = 0;
-          await enterFullscreen();
-          // Hide cursor immediately when video starts
-          hideCursorAggressively();
-          await video.play();
-        } catch (err) {
-          console.log('Reward video play error:', err);
-        }
-      };
+    const onEnded = async () => {
+      document.body.style.cursor = "";
+      try {
+        if (document.exitFullscreen) await document.exitFullscreen();
+        else if (document.webkitExitFullscreen) await document.webkitExitFullscreen();
+        else if (document.mozCancelFullScreen) await document.mozCancelFullScreen();
+        else if (document.msExitFullscreen) await document.msExitFullscreen();
+      } catch (_) {}
+      setShowRewardVideo(false);
+      setShowBlackOverlay(true);
+      setTimeout(() => {
+        setShowCompletionMessage(true);
+        setShowVignette(true);
+      }, 380);
+    };
 
-      // Ensure cursor stays hidden during video playback
-      const handleVideoPlay = () => {
-        hideCursorAggressively();
-      };
+    enterFsAndPlay();
+    v.addEventListener("ended", onEnded);
 
-      const handleVideoPause = () => {
-        // Keep cursor hidden even when paused - video hasn't ended yet
-        if (!video.ended) {
-          hideCursorAggressively();
-        }
-      };
-      
-      const exitFullscreenSafe = async () => {
-        try {
-          if (document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement) {
-            if (document.exitFullscreen) {
-              await document.exitFullscreen();
-            } else if (document.webkitExitFullscreen) {
-              await document.webkitExitFullscreen();
-            } else if (document.mozCancelFullScreen) {
-              await document.mozCancelFullScreen();
-            } else if (document.msExitFullscreen) {
-              await document.msExitFullscreen();
-            }
-          }
-        } catch (err) {
-          console.log('Exit fullscreen error:', err);
-        }
-      };
-
-      const proceedAfterFullscreenExit = () => {
-        setShowRewardVideo(false);
-        setShowBlackOverlay(true);
-        setTimeout(() => {
-          setShowCompletionMessage(true);
-          setShowVignette(true);
-        }, 450);
-      };
-
-      const handleVideoEnd = async () => {
-        // Restore cursor and exit fullscreen, then proceed
-        document.body.style.cursor = '';
-        await exitFullscreenSafe();
-        setTimeout(() => {
-          const stillFs = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
-          if (stillFs) {
-            exitFullscreenSafe().finally(() => {
-              setIsFullscreen(false);
-              proceedAfterFullscreenExit();
-            });
-          } else {
-            setIsFullscreen(false);
-            proceedAfterFullscreenExit();
-          }
-        }, 120);
-      };
-
-      const onFullscreenChange = () => {
-        const active = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
-        setIsFullscreen(active);
-        // Immediately hide cursor when fullscreen changes
-        hideCursorAggressively();
-      };
-
-      // Continuous interval to ensure cursor stays hidden
-      const cursorHideInterval = setInterval(() => {
-        if (!video.ended) {
-          hideCursorAggressively();
-        }
-      }, 100); // Check every 100ms
-
-      // Also hide cursor on any mouse movement during video
-      const handleMouseMove = () => {
-        if (!video.ended) {
-          hideCursorAggressively();
-        }
-      };
-
-      document.addEventListener('mousemove', handleMouseMove);
-      
-      playVideo();
-      
-      video.addEventListener('ended', handleVideoEnd);
-      video.addEventListener('play', handleVideoPlay);
-      video.addEventListener('pause', handleVideoPause);
-      video.addEventListener('timeupdate', hideCursorAggressively); // Hide on every time update
-      document.addEventListener('fullscreenchange', onFullscreenChange);
-      document.addEventListener('webkitfullscreenchange', onFullscreenChange);
-      document.addEventListener('mozfullscreenchange', onFullscreenChange);
-      document.addEventListener('MSFullscreenChange', onFullscreenChange);
-      
-      return () => {
-        clearInterval(cursorHideInterval);
-        document.removeEventListener('mousemove', handleMouseMove);
-        video.removeEventListener('ended', handleVideoEnd);
-        video.removeEventListener('play', handleVideoPlay);
-        video.removeEventListener('pause', handleVideoPause);
-        video.removeEventListener('timeupdate', hideCursorAggressively);
-        // Cleanup: restore cursor and exit fullscreen
-        document.body.style.cursor = '';
-        document.documentElement.style.cursor = '';
-        exitFullscreenSafe();
-        document.removeEventListener('fullscreenchange', onFullscreenChange);
-        document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
-        document.removeEventListener('mozfullscreenchange', onFullscreenChange);
-        document.removeEventListener('MSFullscreenChange', onFullscreenChange);
-      };
-    }
+    return () => {
+      cleaned = true;
+      v.removeEventListener("ended", onEnded);
+      document.body.style.cursor = "";
+      try {
+        if (document.exitFullscreen) document.exitFullscreen();
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        else if (document.mozCancelFullScreen) document.mozCancelFullScreen();
+        else if (document.msExitFullscreen) document.msExitFullscreen();
+      } catch (_) {}
+    };
   }, [showRewardVideo]);
 
-  // Handle completion message transition to next round
-  useEffect(() => {
-    if (showCompletionMessage) {
-      // Remove any focus/caret from previous inputs
-      try {
-        if (document.activeElement && document.activeElement.blur) {
-          document.activeElement.blur();
-        }
-      } catch (_) {}
-
-      // Show both lines together with a slow cinematic fade-in
-      const t1 = setTimeout(() => {
-        setShowLine1(true);
-        setShowLine2(true);
-      }, 200);
-
-      const t3 = setTimeout(() => {
-        if (onComplete) onComplete();
-      }, 4200); // allow enough time to enjoy the fade-in
-      
-      return () => {
-        clearTimeout(t1);
-        clearTimeout(t3);
-      };
-    }
-  }, [showCompletionMessage, onComplete]);
-
-  // Safety: ensure text becomes visible even if timers are delayed
   useEffect(() => {
     if (!showCompletionMessage) return undefined;
+    const t1 = setTimeout(() => {
+      setShowLine1(true);
+      setShowLine2(true);
+    }, 200);
+    const t2 = setTimeout(() => {
+      if (onComplete) onComplete();
+    }, 4200);
     const safety = setTimeout(() => {
-      setShowLine1((prev) => (prev ? prev : true));
-      setShowLine2((prev) => (prev ? prev : true));
+      setShowLine1(true);
+      setShowLine2(true);
     }, 2500);
-    return () => clearTimeout(safety);
-  }, [showCompletionMessage]);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(safety);
+    };
+  }, [showCompletionMessage, onComplete]);
+
+  // small guards for rendering
+  const questionsToRender =
+    Array.isArray(allQues) && allQues.length ? allQues : BUILTIN_TASKS;
 
   return (
     <>
-      {/* Reward Video */}
+      {/* Reward video overlay */}
       {showRewardVideo && (
-        <div className="reward-video-container">
+        <div
+          className="reward-video-container"
+          style={{ position: "fixed", inset: 0, zIndex: 10000 }}
+        >
           <video
             ref={rewardVideoRef}
             className="reward-video"
@@ -513,12 +510,9 @@ const RoundOne = ({ loggedInYear, onComplete }) => {
             autoPlay
             playsInline
             preload="auto"
-            onLoadedData={() => {
-              // Ensure video starts from beginning when data is loaded
-              if (rewardVideoRef.current) {
-                rewardVideoRef.current.currentTime = 0;
-              }
-            }}
+            controls={false}
+            disablePictureInPicture
+            disableRemotePlayback
             style={{
               width: '100vw',
               height: '100vh',
@@ -533,93 +527,59 @@ const RoundOne = ({ loggedInYear, onComplete }) => {
         </div>
       )}
 
-      {/* Black fade overlay between video end and message */}
       {showBlackOverlay && (
         <div
-          className={`black-fade-overlay ${showCompletionMessage ? 'dim' : ''}`}
           style={{
-            position: 'fixed',
+            position: "fixed",
             inset: 0,
-            backgroundColor: '#000',
-            transition: 'opacity 400ms ease',
-            opacity: 1,
+            background: "#000",
             zIndex: 10001,
-            caretColor: 'transparent',
-            outline: 'none'
           }}
         />
       )}
-
-      {/* Cinematic Vignette */}
       {showVignette && (
         <div
           style={{
-            position: 'fixed',
+            position: "fixed",
             inset: 0,
-            pointerEvents: 'none',
+            pointerEvents: "none",
             zIndex: 10002,
-            background: 'radial-gradient(ellipse at center, rgba(0,0,0,0) 38%, rgba(0,0,0,0.55) 72%, rgba(0,0,0,0.85) 100%)',
-            opacity: 1,
-            transition: 'opacity 800ms ease'
+            background:
+              "radial-gradient(ellipse at center, rgba(0,0,0,0) 38%, rgba(0,0,0,0.55) 72%, rgba(0,0,0,0.85) 100%)",
           }}
         />
       )}
 
-      {/* Completion Message */}
       {showCompletionMessage && (
         <div
           style={{
-            position: 'fixed',
+            position: "fixed",
             inset: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
             zIndex: 2147483647,
-            visibility: 'visible',
-            isolation: 'isolate',
-            pointerEvents: 'none',
-            caretColor: 'transparent',
-            outline: 'none'
           }}
         >
           <div
-            style={{
-              textAlign: 'center',
-              color: '#E6194B',
-              fontFamily: 'inherit',
-              letterSpacing: '0.5px',
-              filter: 'none',
-              mixBlendMode: 'normal',
-              padding: '0 24px'
-            }}
+            style={{ textAlign: "center", color: "#E6194B", padding: "0 24px" }}
           >
             <div
               style={{
-                fontSize: 'clamp(28px, 4vw, 56px)',
+                fontSize: "clamp(28px, 4vw, 56px)",
                 fontWeight: 700,
-                marginBottom: '0.4em',
                 opacity: showLine1 ? 1 : 0,
-                filter: showLine1 ? 'blur(0px)' : 'blur(6px)',
-                transition: 'opacity 1400ms cubic-bezier(0.22, 1, 0.36, 1), filter 1400ms cubic-bezier(0.22, 1, 0.36, 1)',
-                lineHeight: 1.1,
-                letterSpacing: '0.02em',
-                WebkitFontSmoothing: 'antialiased',
-                MozOsxFontSmoothing: 'grayscale'
+                transition: "opacity 1200ms",
               }}
             >
               You saved Max
             </div>
             <div
               style={{
-                fontSize: 'clamp(20px, 2.8vw, 40px)',
+                fontSize: "clamp(20px, 2.8vw, 40px)",
                 fontWeight: 600,
                 opacity: showLine2 ? 1 : 0,
-                filter: showLine2 ? 'blur(0px)' : 'blur(6px)',
-                transition: 'opacity 1400ms cubic-bezier(0.22, 1, 0.36, 1), filter 1400ms cubic-bezier(0.22, 1, 0.36, 1)',
-                lineHeight: 1.15,
-                letterSpacing: '0.015em',
-                WebkitFontSmoothing: 'antialiased',
-                MozOsxFontSmoothing: 'grayscale'
+                transition: "opacity 1200ms",
               }}
             >
               Welcome to Round 2
@@ -628,10 +588,9 @@ const RoundOne = ({ loggedInYear, onComplete }) => {
         </div>
       )}
 
-      {/* Expanded Card - Hero Animation - Hides Round 1 completely */}
-      {expandedCard && (
+      {/* Expanded challenge view */}
+      {expandedCard && currentChallenge && (
         <div className="expanded-card-hero">
-          {/* Background Video - Only shown on question pages */}
           <video
             ref={videoRef}
             className="roundone-bg-video"
@@ -640,38 +599,19 @@ const RoundOne = ({ loggedInYear, onComplete }) => {
             playsInline
             preload="auto"
             style={{
-              width: '100vw',
-              height: '100vh',
-              minWidth: '100vw',
-              minHeight: '100vh',
-              maxWidth: '100vw',
-              maxHeight: '100vh',
-              objectFit: 'cover',
-              objectPosition: 'center center',
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
+              width: "100vw",
+              height: "100vh",
+              objectFit: "cover",
+              position: "fixed",
+              inset: 0,
               zIndex: 0,
-              margin: 0,
-              padding: 0
-            }}
-            onLoadedMetadata={(e) => {
-              const video = e.target;
-              video.muted = false;
-              video.volume = 0.6;
-            }}
-            onVolumeChange={(e) => {
-              const video = e.target;
-              if (video.muted) video.muted = false;
             }}
           >
             <source src={roundOneBgVideo} type="video/mp4" />
           </video>
           
-          <div className={`expanded-card-hero-content ${currentChallenge?.type === 'crossword' ? 'crossword-full-width' : ''}`}>
-            {currentChallenge.type !== 'crossword' && (
+          <div className={`expanded-card-hero-content ${currentChallenge?.type === 'crossword' || currentChallenge?.source === 'crossword' ? 'crossword-full-width' : ''}`}>
+            {currentChallenge.type !== 'crossword' && currentChallenge.source !== 'crossword' && (
               <>
                 <div className="save-max-banner">
                   <p className="save-max-text">Complete this round to save Max</p>
@@ -693,7 +633,7 @@ const RoundOne = ({ loggedInYear, onComplete }) => {
                   <p className="challenge-question-large">{currentChallenge.challenge}</p>
                 </div>
               )}
-              {currentChallenge.type === 'crossword' && (
+              {(currentChallenge.type === 'crossword' || currentChallenge.source === 'crossword') && (
                 <div style={{ 
                   width: '100%',
                   height: '100%',
@@ -707,11 +647,12 @@ const RoundOne = ({ loggedInYear, onComplete }) => {
                     onComplete={() => {
                       setIsCompleted(true);
                       setError('');
-                      // Mark crossword (id 3) as completed and check if all are done
+                      // Mark crossword as completed and check if all are done
                       setCompletedQuestions(prev => {
-                        const newCompleted = new Set([...prev, 3]);
+                        const newCompleted = new Set([...prev, expandedCard]);
+                        const questionsToUse = Array.isArray(allQues) && allQues.length ? allQues : BUILTIN_TASKS;
                         // Check if all questions are completed
-                        if (newCompleted.size === 6) {
+                        if (newCompleted.size === questionsToUse.length) {
                           // All questions completed, show reward video after closing
                           setTimeout(() => {
                             setExpandedCard(null);
@@ -757,7 +698,7 @@ const RoundOne = ({ loggedInYear, onComplete }) => {
               )}
             </div>
 
-            {currentChallenge.type !== 'crossword' && (
+            {currentChallenge.type !== 'crossword' && currentChallenge.source !== 'crossword' && (
               <form onSubmit={handleAnswerSubmit} className="expanded-answer-form">
                 <input
                   type="text"
@@ -776,34 +717,46 @@ const RoundOne = ({ loggedInYear, onComplete }) => {
             )}
 
             {error && (
-              <div className={`expanded-message ${error.includes('Correct') ? 'success' : 'error'}`}>
-                {error}
-              </div>
+              <div style={{ marginTop: 8, color: "salmon" }}>{error}</div>
             )}
-
             {isCompleted && (
-              <div className="challenge-completed-message">
-                <h3>🎉 Challenge Complete! 🎉</h3>
-                <p>Proceeding to Round 2...</p>
+              <div style={{ marginTop: 12 }}>
+                <h3>🎉 Challenge Complete!</h3>
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* Round 1 Content - Hidden when card is expanded */}
+      {/* Main round view when nothing expanded */}
       {!expandedCard && (
         <div className="round-one-container">
           <h2 className="round-title">Round 1 - Dungeons and Dragons</h2>
 
-          {/* Six Challenge Cards Grid */}
-          <div className={`challenge-cards-grid ${previewCardId ? 'cards-hidden' : ''}`}>
-            {tasks.map((task) => (
-              <div 
-                key={task.id} 
+          {loading && <div style={{ padding: 12 }}>Loading questions...</div>}
+          {fetchError && (
+            <div style={{ padding: 12, color: "tomato" }}>
+              Failed to fetch questions - using fallback questions.
+            </div>
+          )}
+
+          <div
+            className={`challenge-cards-grid ${
+              previewCardId ? "cards-hidden" : ""
+            }`}
+          >
+            {questionsToRender.map((task) => (
+              <div
+                key={task.id}
                 className="challenge-card-number"
-                ref={(el) => { cardRefs.current[task.id] = el; }}
-                style={previewCardId === task.id ? { visibility: 'hidden' } : undefined}
+                ref={(el) => {
+                  cardRefs.current[task.id] = el;
+                }}
+                style={
+                  previewCardId === task.id
+                    ? { visibility: "hidden" }
+                    : undefined
+                }
               >
                 <div className="card-front">
                   {completedQuestions.has(task.id) && (
@@ -816,66 +769,68 @@ const RoundOne = ({ loggedInYear, onComplete }) => {
             ))}
           </div>
 
-          {/* Floating Dice Popup - Click to roll */}
           {showDicePopup && (
-            <div 
+            <div
               ref={overlayRef}
               className="dice-popup-overlay"
-              onClick={handleOverlayClick}
+              onClick={() => {
+                if (!isDiceRolling) rollDice();
+              }}
               onMouseMove={handleMouseMove}
               onMouseLeave={handleMouseLeave}
             >
               <div className="dice-popup-container">
-                <div 
+                <div
                   ref={diceRef}
-                  className={`dice-3d ${isDiceRolling ? 'rolling' : ''}`}
+                  className={`dice-3d ${isDiceRolling ? "rolling" : ""}`}
                   style={{ transform: getDiceTransformWithMouse() }}
                 >
+                  {/* faces simplified - keep your original DOM if preferred */}
                   <div className="dice-face dice-face-1">
-                    <div className="dice-dot"></div>
+                    <div className="dice-dot" />
                   </div>
                   <div className="dice-face dice-face-2">
-                    <div className="dice-dot"></div>
-                    <div className="dice-dot"></div>
+                    <div className="dice-dot" />
+                    <div className="dice-dot" />
                   </div>
                   <div className="dice-face dice-face-3">
-                    <div className="dice-dot"></div>
-                    <div className="dice-dot"></div>
-                    <div className="dice-dot"></div>
+                    <div className="dice-dot" />
+                    <div className="dice-dot" />
+                    <div className="dice-dot" />
                   </div>
                   <div className="dice-face dice-face-4">
                     <div className="dice-row">
-                      <div className="dice-dot"></div>
-                      <div className="dice-dot"></div>
+                      <div className="dice-dot" />
+                      <div className="dice-dot" />
                     </div>
                     <div className="dice-row">
-                      <div className="dice-dot"></div>
-                      <div className="dice-dot"></div>
+                      <div className="dice-dot" />
+                      <div className="dice-dot" />
                     </div>
                   </div>
                   <div className="dice-face dice-face-5">
                     <div className="dice-row">
-                      <div className="dice-dot"></div>
-                      <div className="dice-dot"></div>
+                      <div className="dice-dot" />
+                      <div className="dice-dot" />
                     </div>
                     <div className="dice-row">
-                      <div className="dice-dot"></div>
+                      <div className="dice-dot" />
                     </div>
                     <div className="dice-row">
-                      <div className="dice-dot"></div>
-                      <div className="dice-dot"></div>
+                      <div className="dice-dot" />
+                      <div className="dice-dot" />
                     </div>
                   </div>
                   <div className="dice-face dice-face-6">
                     <div className="dice-row">
-                      <div className="dice-dot"></div>
-                      <div className="dice-dot"></div>
-                      <div className="dice-dot"></div>
+                      <div className="dice-dot" />
+                      <div className="dice-dot" />
+                      <div className="dice-dot" />
                     </div>
                     <div className="dice-row">
-                      <div className="dice-dot"></div>
-                      <div className="dice-dot"></div>
-                      <div className="dice-dot"></div>
+                      <div className="dice-dot" />
+                      <div className="dice-dot" />
+                      <div className="dice-dot" />
                     </div>
                   </div>
                 </div>
@@ -883,51 +838,68 @@ const RoundOne = ({ loggedInYear, onComplete }) => {
             </div>
           )}
 
-          {/* Result Preview - fly from card position to center at same size; tap to continue below */}
-          {previewCardId && previewChallenge && previewFromRect && previewTargetPos && (
-            <>
-              <div className="result-preview-scrim" />
-              <div
-                className={`result-preview-flycard ${previewAnimActive ? 'active' : ''}`}
-                style={{
-                  position: 'fixed',
-                  left: previewFromRect.left,
-                  top: previewFromRect.top,
-                  width: previewFromRect.width,
-                  height: previewFromRect.height,
-                  transform: previewAnimActive
-                    ? `translate(${previewTargetPos.left - previewFromRect.left}px, ${previewTargetPos.top - previewFromRect.top}px)`
-                    : 'translate(0px, 0px)',
-                }}
-              >
-                <div className="result-preview-card-inner">
-                  <div className="result-preview-header">
-                    <div className="result-preview-number">{previewChallenge.id}</div>
-                    <div className="result-preview-title">{previewChallenge.title}</div>
+          {previewCardId &&
+            previewChallenge &&
+            previewFromRect &&
+            previewTargetPos && (
+              <>
+                <div className="result-preview-scrim" />
+                <div
+                  className={`result-preview-flycard ${
+                    previewAnimActive ? "active" : ""
+                  }`}
+                  style={{
+                    position: "fixed",
+                    left: previewFromRect.left,
+                    top: previewFromRect.top,
+                    width: previewFromRect.width,
+                    height: previewFromRect.height,
+                    transform: previewAnimActive
+                      ? `translate(${
+                          previewTargetPos.left - previewFromRect.left
+                        }px, ${previewTargetPos.top - previewFromRect.top}px)`
+                      : "translate(0,0)",
+                  }}
+                >
+                  <div className="result-preview-card-inner">
+                    <div className="result-preview-header">
+                      <div className="result-preview-number">
+                        {previewChallenge.id}
+                      </div>
+                      <div className="result-preview-title">
+                        {previewChallenge.title}
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <button
-                className={`tap-to-continue ${previewAnimActive ? 'visible' : ''}`}
-                style={{
-                  position: 'fixed',
-                  left: Math.round(previewTargetPos.left + previewFromRect.width / 2),
-                  top: Math.round(previewTargetPos.top + previewFromRect.height + 16),
-                  transform: 'translateX(-50%)',
-                }}
-                onClick={() => {
-                  const id = previewCardId;
-                  setPreviewCardId(null);
-                  setPreviewFromRect(null);
-                  setPreviewTargetPos(null);
-                  setPreviewAnimActive(false);
-                  setTimeout(() => setExpandedCard(id), 120);
-                }}
-              >
-                Tap to continue
-              </button>
-            </>
-          )}
+
+                <button
+                  className={`tap-to-continue ${
+                    previewAnimActive ? "visible" : ""
+                  }`}
+                  style={{
+                    position: "fixed",
+                    left: Math.round(
+                      previewTargetPos.left + previewFromRect.width / 2
+                    ),
+                    top: Math.round(
+                      previewTargetPos.top + previewFromRect.height + 16
+                    ),
+                    transform: "translateX(-50%)",
+                  }}
+                  onClick={() => {
+                    const id = previewCardId;
+                    setPreviewCardId(null);
+                    setPreviewFromRect(null);
+                    setPreviewTargetPos(null);
+                    setPreviewAnimActive(false);
+                    setTimeout(() => setExpandedCard(id), 120);
+                  }}
+                >
+                  Tap to continue
+                </button>
+              </>
+            )}
         </div>
       )}
     </>

@@ -1,4 +1,6 @@
 import Round3Answer from '../models/Round3Answer.js';
+import Round3Player from '../models/Round3Player.js';
+
 
 // 🟢 Create (POST)
 export const createAnswer = async (req, res) => {
@@ -53,11 +55,11 @@ export const getAnswer = async (req, res) => {
 // 🟡 Update (PUT)
 export const updateAnswer = async (req, res) => {
   try {
-    const { year } = req.params;
+    const { id } = req.params;
     const { answer } = req.body;
 
     const updated = await Round3Answer.findOneAndUpdate(
-      { yr: year },
+      { _id: id },
       { answer },
       { new: true }
     );
@@ -78,19 +80,50 @@ export const updateAnswer = async (req, res) => {
 // 🔴 Delete (DELETE)
 export const deleteAnswer = async (req, res) => {
   try {
-    const { year } = req.params;
-    const deleted = await Round3Answer.findOneAndDelete({ yr: year });
+    const { id } = req.params;
+    const deleted = await Round3Answer.findOneAndDelete({ _id: id });
 
     if (!deleted)
-      return res.status(404).json({ success: false, message: `No answer found for year ${year}` });
+      return res.status(404).json({ success: false, message: `No answer found for id ${id}` });
 
     res.status(200).json({
       success: true,
-      message: `Answer for year ${year} deleted successfully`
+      message: `Answer for id ${id} deleted successfully`
     });
   } catch (err) {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
 
+// 🟣 Player Submit Answer (POST)
+export const submitPlayerAnswer = async (req, res) => {
+  try {
+    const { year, answer } = req.body;
+    const email = req.user?.email || req.body.email || null;
 
+    if (year == null || !answer) return res.status(400).json({ success: false, message: "Year and answer are required" });
+
+    // fetch answer key from Round3Answer model
+    const key = await Round3Answer.findOne({ yr: Number(year) });
+    if (!key) return res.status(404).json({ success: false, message: "No answer key found for this year" });
+
+    const playerAns = String(answer).trim().toLowerCase();
+    const correctArr = Array.isArray(key.answer) ? key.answer : [key.answer];
+    const normalizedCorrect = correctArr.map(a => String(a).trim().toLowerCase());
+    const isCorrect = normalizedCorrect.includes(playerAns);
+
+    // record player attempt if email present (upsert by email+year)
+    if (email) {
+      await Round3Player.findOneAndUpdate(
+        { email: email.toLowerCase(), year: Number(year) },
+        { email: email.toLowerCase(), year: Number(year), answered: true, lastResult: isCorrect },
+        { upsert: true, new: true }
+      );
+    }
+
+    return res.status(200).json({ success: true, isCorrect, message: isCorrect ? "Correct answer" : "Wrong answer" });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
