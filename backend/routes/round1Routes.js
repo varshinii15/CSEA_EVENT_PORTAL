@@ -17,7 +17,7 @@ router.delete('/delete-qn/:id',deleteqn);
 
 
 router.post('/player/submit-answer', authmiddleware.verifyToken, submitAnswer);
-router.post('/player/submit-crossword-ans', authmiddleware.verifyToken, submitCrosswordAnswer);
+router.post('/player/submit-crossword-ans/:yr', authmiddleware.verifyToken, submitCrosswordAnswer);
 router.get('/player/answered-questions', authmiddleware.verifyToken, getAnsweredQuestions);
 router.get('/player/score', authmiddleware.verifyToken, getPlayerScore);
 

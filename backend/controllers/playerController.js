@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import PlayerAnswers from "../models/PlayerAnswers.js";
-import Questions, {Crossword} from "../models/roundonemodel.js";
+import Questions, { Crossword } from "../models/roundonemodel.js";
 import steg from "../models/stegmodels.js";
 export const submitAnswer = async (req, res) => {
   try {
@@ -20,11 +20,11 @@ export const submitAnswer = async (req, res) => {
         .status(400)
         .json({ success: false, message: "Invalid questionId" });
     }
-const [q1, q2] = await Promise.all([
-  Questions.findById(questionId),
-  steg.findById(questionId)
-]);
-    const question = q1 || q2
+    const [q1, q2] = await Promise.all([
+      Questions.findById(questionId),
+      steg.findById(questionId),
+    ]);
+    const question = q1 || q2;
     if (!question) {
       return res.status(404).json({
         success: false,
@@ -194,76 +194,91 @@ export const getPlayerScore = async (req, res) => {
 
 export const submitCrosswordAnswer = async (req, res) => {
   try {
-    const { crosswordId, answers } = req.body;
-    const { email, year, name } = req.user;
+    const { answers } = req.body;
+    const { email, year } = req.user;
+    const name = email;
+    const { yr } = req.params;
 
-    if (!crosswordId || !answers || typeof answers !== "object") {
+    console.log("=== submitCrosswordAnswer ===");
+    console.log("req.params.yr:", yr);
+    console.log("req.user.year:", year);
+    console.log("req.body.answers:", answers);
+
+    if (!Array.isArray(answers)) {
       return res.status(400).json({
         success: false,
-        message: "crosswordId and answers object are required",
+        message: "Answers array is required",
       });
     }
 
-    if (!mongoose.Types.ObjectId.isValid(crosswordId)) {
-      return res.status(400).json({ success: false, message: "Invalid crosswordId" });
+    // Year restriction
+    if (Number(yr) !== Number(year)) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only submit crosswords for your year",
+      });
     }
 
-    const crossword = await Crossword.findById(crosswordId);
-    if (!crossword) {
-      return res.status(404).json({ success: false, message: "Crossword not found" });
+    // Get crossword for that year from Questions collection
+    const stored = await Questions.findOne({
+      yr: Number(yr),
+      type: "crossword",
+    });
+
+    console.log("Found crossword:", stored ? `ID: ${stored._id}` : "NULL");
+    console.log("Full stored document:", JSON.stringify(stored, null, 2));
+    console.log("stored.answer:", stored?.answer);
+    console.log("stored.answers:", stored?.answers);
+    console.log(
+      "All keys:",
+      stored ? Object.keys(stored.toObject ? stored.toObject() : stored) : "N/A"
+    );
+
+    if (!stored) {
+      return res.status(500).json({
+        success: false,
+        message: "Crossword not found in database",
+      });
     }
 
-    // year check (support yr or year)
-    if (crossword.yr != null && year != null && Number(crossword.yr) !== Number(year)) {
-      return res.status(403).json({ success: false, message: "You can only submit crosswords for your year" });
+    // Try different possible field names
+    const answerArray = stored.answer || stored.answers || stored.ans || [];
+
+    console.log("answerArray:", answerArray);
+    console.log("answerArray type:", typeof answerArray);
+    console.log("answerArray isArray:", Array.isArray(answerArray));
+
+    if (!Array.isArray(answerArray) || answerArray.length === 0) {
+      return res.status(500).json({
+        success: false,
+        message: "Invalid crossword answer format in database",
+      });
     }
-    if (crossword.year != null && year != null && Number(crossword.year) !== Number(year)) {
-      return res.status(403).json({ success: false, message: "You can only submit crosswords for your year" });
-    }
 
-    const normalize = (v) => (typeof v === "string" ? v.trim().toLowerCase() : "");
-
-    const storedAcross = (crossword.answers && crossword.answers.across) || {};
-    const storedDown = (crossword.answers && crossword.answers.down) || {};
-
-    const getExpected = (store, key) => (typeof store.get === "function" ? store.get(key) : store?.[key]);
-
-    const result = { across: {}, down: {} };
-    let total = 0;
+    const total = answerArray.length;
     let correct = 0;
+    const result = [];
 
-    const submittedAcross = answers.across || {};
-    for (const k of Object.keys(submittedAcross)) {
-      total++;
-      const expected = getExpected(storedAcross, k);
-      const isCorrect = normalize(submittedAcross[k]) === normalize(expected);
-      if (isCorrect) correct++;
-      result.across[k] = { submitted: submittedAcross[k], expected: expected ?? null, correct: isCorrect };
-    }
+    for (let i = 0; i < total; i++) {
+      const expected = answerArray[i]?.trim().toLowerCase() || "";
+      const submitted = answers[i]?.answer?.trim().toLowerCase() || "";
 
-    const submittedDown = answers.down || {};
-    for (const k of Object.keys(submittedDown)) {
-      total++;
-      const expected = getExpected(storedDown, k);
-      const isCorrect = normalize(submittedDown[k]) === normalize(expected);
+      const isCorrect = expected === submitted && expected !== "";
       if (isCorrect) correct++;
-      result.down[k] = { submitted: submittedDown[k], expected: expected ?? null, correct: isCorrect };
-    }
-    // Check if all required answers were submitted
-    const totalRequired = Object.keys(storedAcross).length + Object.keys(storedDown).length;
-    const totalSubmitted = Object.keys(submittedAcross).length + Object.keys(submittedDown).length;
-    
-    if (totalSubmitted < totalRequired) {
-      return res.status(400).json({
-        success: false,
-        message: `Incomplete submission. Expected ${totalRequired} answers, received ${totalSubmitted}.`
+
+      result.push({
+        pos: i + 1,
+        submitted,
+        correct: isCorrect,
       });
     }
-    const allCorrect = total > 0 && correct === total;
 
+    const allCorrect = correct === total;
+
+    // Save or update player's crossword submission
     let playerAnswer = await PlayerAnswers.findOne({
       name,
-      questionId: crosswordId,
+      questionId: stored._id, // 🔥 ADD THIS
       round: "roundone",
     });
 
@@ -271,7 +286,7 @@ export const submitCrosswordAnswer = async (req, res) => {
       name,
       email,
       year,
-      questionId: crosswordId,
+      questionId: stored._id, // 🔥 ADD THIS
       userAnswer: JSON.stringify(answers),
       isCorrect: allCorrect,
       round: "roundone",
@@ -280,43 +295,18 @@ export const submitCrosswordAnswer = async (req, res) => {
     };
 
     if (playerAnswer) {
-      playerAnswer.userAnswer = payload.userAnswer;
-      playerAnswer.isCorrect = payload.isCorrect;
-      playerAnswer.attemptedAt = payload.attemptedAt;
-      playerAnswer.meta = payload.meta;
+      Object.assign(playerAnswer, payload);
       await playerAnswer.save();
-
-      if (allCorrect) {
-        return res.status(200).json({
-          success: true,
-          message: "Correct answer! Congratulations.",
-          data: { questionId: crosswordId, isCorrect: true, total, correct, details: result },
-        });
-      } else {
-        return res.status(200).json({
-          success: true,
-          message: "Submission recorded",
-          data: { questionId: crosswordId, isCorrect: false, total, correct, details: result },
-        });
-      }
-    }
-
-    const newAnswer = new PlayerAnswers(payload);
-    await newAnswer.save();
-
-    if (allCorrect) {
-      return res.status(201).json({
-        success: true,
-        message: "Correct answer! Congratulations.",
-        data: { questionId: crosswordId, isCorrect: true, total, correct, details: result },
-      });
     } else {
-      return res.status(201).json({
-        success: true,
-        message: "Submission recorded",
-        data: { questionId: crosswordId, isCorrect: false, total, correct, details: result },
-      });
+      playerAnswer = new PlayerAnswers(payload);
+      await playerAnswer.save();
     }
+
+    return res.status(200).json({
+      success: true,
+      message: allCorrect ? "All correct! 🎉" : "Submitted",
+      data: { total, correct, allCorrect, details: result },
+    });
   } catch (error) {
     console.error("submitCrosswordAnswer error:", error);
     res.status(500).json({ success: false, message: "Internal server error" });
